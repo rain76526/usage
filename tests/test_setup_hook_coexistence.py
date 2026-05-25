@@ -14,6 +14,11 @@ import setup_hook
 import usage_statusline_forwarder
 
 
+def _norm(p: object) -> str:
+    """Normalize path separators to forward slashes for cross-platform comparison."""
+    return str(p).replace("\\", "/")
+
+
 def _patch_setup_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> tuple[Path, Path, Path]:
     claude_dir = tmp_path / ".claude"
     claude_dir.mkdir()
@@ -43,7 +48,7 @@ def test_install_when_no_existing_statusline(
     assert setup_hook.setup() == 0
     data = json.loads(settings.read_text(encoding="utf-8"))
 
-    assert data["statusLine"]["command"] == f"/usr/bin/python3 {hook_target}"
+    assert _norm(data["statusLine"]["command"]) == f"/usr/bin/python3 {_norm(hook_target)}"
     assert hook_target.exists()
     assert not forwarder_target.exists()
 
@@ -59,7 +64,7 @@ def test_install_when_tt_statusline_exists(
     assert setup_hook.setup() == 0
     data = json.loads(settings.read_text(encoding="utf-8"))
 
-    assert data["statusLine"]["command"] == f"/usr/bin/python3 {forwarder_target}"
+    assert _norm(data["statusLine"]["command"]) == f"/usr/bin/python3 {_norm(forwarder_target)}"
     assert data["usage"]["previousStatusLine"] == external
     assert hook_target.exists()
     assert forwarder_target.exists()

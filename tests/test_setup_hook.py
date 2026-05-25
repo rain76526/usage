@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -72,7 +73,7 @@ def test_setup_backs_up_existing_statusline_and_is_idempotent(
     assert setup_hook.setup() == 0
 
     data = json.loads(settings.read_text(encoding="utf-8"))
-    assert data["statusLine"]["command"] == f"/usr/bin/python3 {setup_hook.FORWARDER_TARGET}"
+    assert _norm(data["statusLine"]["command"]) == f"/usr/bin/python3 {_norm(setup_hook.FORWARDER_TARGET)}"
     assert data["usage"]["previousStatusLine"] == original
     assert hook_target.exists()
     assert setup_hook.FORWARDER_TARGET.exists()
@@ -149,6 +150,7 @@ def test_migration_removes_legacy_files_and_moves_backup(
     assert data["usage"]["previousStatusLine"] == previous
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="/bin/sh not available on Windows")
 def test_statusline_command_quotes_paths_with_spaces(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

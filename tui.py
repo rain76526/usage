@@ -7,7 +7,11 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
-from Foundation import NSLocale
+try:
+    from Foundation import NSLocale as _NSLocale
+    _HAS_NSLOCALE = True
+except ImportError:
+    _HAS_NSLOCALE = False
 from rich.align import Align
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
@@ -51,7 +55,9 @@ def _normalize_language(code: str | None) -> str:
 
 def _detect_language() -> str:
     try:
-        locale = NSLocale.currentLocale()
+        if not _HAS_NSLOCALE:
+            return "en"
+        locale = _NSLocale.currentLocale()
         code_attr = getattr(locale, "languageCode", None)
         code = code_attr() if callable(code_attr) else code_attr
         return _normalize_language(str(code) if code is not None else None)
