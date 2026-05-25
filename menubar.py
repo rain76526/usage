@@ -5,14 +5,20 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
+import shlex
+import tempfile
 import threading
 import time
+import tomllib
+import webbrowser
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
+from importlib import metadata
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import objc
 from AppKit import (
@@ -31,44 +37,30 @@ from AppKit import (
     NSVariableStatusItemLength,
     NSViewController,
 )
-from Foundation import (
-    NSBundle,
-    NSObject,
-    NSRunLoop,
-    NSRunLoopCommonModes,
-    NSTimer,
-)
+from Foundation import NSLocale, NSObject, NSRunLoop, NSRunLoopCommonModes, NSTimer
 
 import codex_loader
+import login_item
 import panels
-from history_loader import load_entries
+import update_checker
+from burn_rate import WARNING_PERCENT_FLOOR, BurnRateTracker
+from history_loader import UsageEntry, load_entries
+from i18n import _t, packaged_resource_path
+from main import _load_preferences, _save_preferences
 from panels.base import Panel as UsagePanel
 from panels.base import load_active_panel_id, save_active_panel_id
 from pricing import calculate_cost
 from usage_client import ClaudeUsageClient, PollOutcome, PollState
 from usage_rate import GROUP_NAMES, UsageRateTracker
 
-POPOVER_WIDTH = 364.0
-CONTENT_HEIGHT = 574.0
-PADDING = 14.0
-TRACK_HEIGHT = 8.0
-CARD_HEIGHT = 184.0
-FOOTER_HEIGHT = 152.0
-CARD_RADIUS = 18.0
-CARD_HEADER_TOP = 22.0
-CARD_ROW_TOP = 66.0
-CARD_ROW_GAP = 64.0
-CARD_SIDE_INSET = 18.0
-SECTION_GAP = 14.0
-FOOTER_GAP = 12.0
-FOOTER_LINE_GAP = 18.0
-BUTTON_TOP_GAP = 18.0
 BUTTON_HEIGHT = 32.0
 INSTALL_BUTTON_EXTRA_HEIGHT = BUTTON_HEIGHT + 10.0
 CLAUDE_COLOR = (244 / 255, 145 / 255, 100 / 255)
 CODEX_COLOR = (88 / 255, 214 / 255, 230 / 255)
 WARN_COLOR = (255 / 255, 196 / 255, 57 / 255)
 DANGER_COLOR = (255 / 255, 69 / 255, 58 / 255)
+UPDATE_DISMISS_SECONDS = 24 * 3600
+UPDATE_ALERT_BODY_LIMIT = 2000
 
 logger = logging.getLogger(__name__)
 
@@ -81,18 +73,75 @@ def _bar_color(pct: float, brand: tuple[float, float, float]) -> tuple[float, fl
     return brand
 
 
-def _resolve_resource(name: str) -> str:
-    bundle = NSBundle.mainBundle()
-    if bundle is not None:
-        stem, _, ext = name.rpartition(".")
-        path = bundle.pathForResource_ofType_(stem, ext)
-        if path:
-            return str(path)
-    return str(Path(__file__).parent / "assets" / name)
+def _normalize_language(code: str | None) -> str:
+    if not code:
+        return "en"
+    normalized = code.strip().lower().replace("_", "-")
+    if normalized in {"zh-tw", "zh-hant"} or normalized.startswith("zh-tw-"):
+        return "zh-TW"
+    if normalized in {"zh-cn", "zh-hans", "zh"} or normalized.startswith("zh-cn-"):
+        return "zh-CN"
+    if normalized.startswith("zh-hans"):
+        return "zh-CN"
+    if normalized.startswith("zh-hant"):
+        return "zh-TW"
+    if normalized.startswith("ja"):
+        return "ja"
+    if normalized.startswith("ko"):
+        return "ko"
+    return "en"
 
 
-CLAUDE_ICON_PATH = _resolve_resource("claude.webp")
-CODEX_ICON_PATH = _resolve_resource("codex.webp")
+def _detect_language() -> str:
+    if override := os.environ.get("USAGE_LANG"):
+        return _normalize_language(override)
+    try:
+        # preferredLanguages reflects the user's system language list and is not
+        # affected by the bundle's CFBundleDevelopmentRegion / .lproj mapping.
+        preferred = NSLocale.preferredLanguages()
+        if preferred:
+            return _normalize_language(str(preferred[0]))
+        locale = NSLocale.currentLocale()
+        identifier_attr = getattr(locale, "localeIdentifier", None)
+        identifier = identifier_attr() if callable(identifier_attr) else identifier_attr
+        return _normalize_language(str(identifier) if identifier is not None else None)
+    except Exception:
+        return "en"
+
+
+def _group_name(group: int, language: str) -> str:
+    return _t(language, f"group_{GROUP_NAMES[group].lower()}")
+
+
+def _panel_title(panel: UsagePanel, language: str) -> str:
+    return _t(language, panel.i18n_key)
+
+
+def _auto_update_check_enabled(prefs: dict[str, Any] | None = None) -> bool:
+    data = _load_preferences() if prefs is None else prefs
+    return data.get("auto_update_check") is not False
+
+
+def _update_dismissed_recently(prefs: dict[str, Any]) -> bool:
+    dismissed_at = prefs.get("update_dismissed_at")
+    if isinstance(dismissed_at, int | float):
+        return (time.time() - float(dismissed_at)) < UPDATE_DISMISS_SECONDS
+    return False
+
+
+def _current_version() -> str:
+    try:
+        return metadata.version("usage")
+    except metadata.PackageNotFoundError as exc:
+        pyproject = packaged_resource_path(
+            "pyproject.toml", Path(__file__).with_name("pyproject.toml")
+        )
+        data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+        version = data.get("project", {}).get("version")
+        if isinstance(version, str):
+            return version
+        raise RuntimeError("project.version missing from pyproject.toml") from exc
+
 
 _APP_DELEGATE: AppDelegate | None = None
 
@@ -104,33 +153,39 @@ class QuotaRowState:
     percent_text: str
     reset_text: str
     color: tuple[float, float, float]
+    warning: bool = False
     available: bool = True
 
 
 @dataclass(slots=True)
 class PopoverState:
+    language: str
     claude_session: QuotaRowState
     claude_weekly: QuotaRowState
     codex_session: QuotaRowState
     codex_weekly: QuotaRowState
+    projects: list[tuple[str, int, float | None]]
+    projects_7d: list[tuple[str, int, float | None]]
+    projects_30d: list[tuple[str, int, float | None]]
     rate_text: str
     status_text: str
     today_text: str
+    statusline: dict[str, object]
     show_install_button: bool = False
 
 
-def format_human_time(seconds: float) -> str:
+def format_human_time(seconds: float, language: str = "en") -> str:
     if seconds <= 0:
-        return "0m"
+        return _t(language, "duration_minutes", minutes=0)
     days, remainder = divmod(int(seconds), 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes, _ = divmod(remainder, 60)
 
     if days > 0:
-        return f"{days}d {hours}h"
+        return _t(language, "duration_days", days=days, hours=hours)
     if hours > 0:
-        return f"{hours}h {minutes}m"
-    return f"{minutes}m"
+        return _t(language, "duration_hours", hours=hours, minutes=minutes)
+    return _t(language, "duration_minutes", minutes=minutes)
 
 
 class PopoverViewController(NSViewController):
@@ -149,6 +204,8 @@ class PopoverViewController(NSViewController):
         return self
 
     def rebuildWithPanel_(self, panel: UsagePanel) -> None:
+        if hasattr(self.content_view, "teardown"):
+            self.content_view.teardown()
         self.panel = panel
         self.content_view = panel.build_view(self.delegate)
         self.setView_(self.content_view)
@@ -169,7 +226,9 @@ class AppDelegate(NSObject):
     latest_state = objc.ivar()
     active_panel = objc.ivar()
     codex_5h_pct = objc.ivar()
+    burn_rate_trackers = objc.ivar()
     _refresh_in_flight = objc.ivar()
+    language = objc.ivar()
 
     def initWithMock_interval_(self, mock: bool, interval: int) -> AppDelegate:
         self = objc.super(AppDelegate, self).init()
@@ -178,9 +237,16 @@ class AppDelegate(NSObject):
         self.mock = mock
         self.interval = max(30, interval)
         self.tracker = UsageRateTracker(mock=mock)
+        self.language = _detect_language()
         self.codex_5h_pct = None
-        self.latest_state = _empty_state()
+        self.latest_state = _empty_state(self.language)
         self.active_panel = panels.get_panel(load_active_panel_id())
+        self.burn_rate_trackers = {
+            "claude_session": BurnRateTracker(),
+            "claude_weekly": BurnRateTracker(),
+            "codex_session": BurnRateTracker(),
+            "codex_weekly": BurnRateTracker(),
+        }
         self._refresh_in_flight = False
         return self
 
@@ -212,6 +278,8 @@ class AppDelegate(NSObject):
             True,
         )
         NSRunLoop.currentRunLoop().addTimer_forMode_(self.timer, NSRunLoopCommonModes)
+        thread = threading.Thread(target=self._maybe_check_update_in_background, daemon=True)
+        thread.start()
 
     def timerFired_(self, timer: Any) -> None:
         self._refresh()
@@ -223,16 +291,40 @@ class AppDelegate(NSObject):
         thread = threading.Thread(target=self._install_hook_in_background, daemon=True)
         thread.start()
 
+    def toggleStatusline_(self, sender: Any) -> None:
+        thread = threading.Thread(target=self._toggle_statusline_in_background, daemon=True)
+        thread.start()
+
+    def installStatusline_(self, sender: Any) -> None:
+        thread = threading.Thread(
+            target=self._statusline_action_in_background,
+            args=("install",),
+            daemon=True,
+        )
+        thread.start()
+
+    def uninstallStatusline_(self, sender: Any) -> None:
+        thread = threading.Thread(
+            target=self._statusline_action_in_background,
+            args=("uninstall",),
+            daemon=True,
+        )
+        thread.start()
+
+    def analyzeUsage_(self, sender: Any) -> None:
+        thread = threading.Thread(target=self._analyze_usage_in_background, daemon=True)
+        thread.start()
+
     def quitApp_(self, sender: Any) -> None:
         if self.timer is not None:
             self.timer.invalidate()
         NSApp.terminate_(sender)
 
     def switchPanel_(self, sender: Any) -> None:
-        menu = NSMenu.alloc().initWithTitle_("更換面板")
+        menu = NSMenu.alloc().initWithTitle_(_t(self.language, "switch_panel"))
         for panel in panels.all_panels():
             item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
-                panel.display_name,
+                _panel_title(panel, self.language),
                 "selectPanel:",
                 "",
             )
@@ -240,11 +332,153 @@ class AppDelegate(NSObject):
             item.setRepresentedObject_(panel.id)
             item.setState_(1 if panel.id == self.active_panel.id else 0)
             menu.addItem_(item)
+        menu.addItem_(NSMenuItem.separatorItem())
+        launch_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            _t(self.language, "launch_at_login"),
+            "toggleLaunchAtLogin:",
+            "",
+        )
+        launch_item.setTarget_(self)
+        launch_item.setState_(1 if login_item.is_enabled() else 0)
+        menu.addItem_(launch_item)
+        menu.addItem_(NSMenuItem.separatorItem())
+        auto_update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            _t(self.language, "auto_update_check"),
+            "toggleAutoUpdateCheck:",
+            "",
+        )
+        auto_update_item.setTarget_(self)
+        auto_update_item.setState_(1 if _auto_update_check_enabled() else 0)
+        menu.addItem_(auto_update_item)
+        check_update_item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+            _t(self.language, "update_check_now"),
+            "checkUpdateNow:",
+            "",
+        )
+        check_update_item.setTarget_(self)
+        menu.addItem_(check_update_item)
         menu.popUpMenuPositioningItem_atLocation_inView_(None, NSMakePoint(0, 0), sender)
 
     def selectPanel_(self, sender: Any) -> None:
         panel_id = str(sender.representedObject())
         self._set_active_panel_id(panel_id)
+
+    def toggleLaunchAtLogin_(self, sender: Any) -> None:
+        try:
+            if login_item.is_enabled():
+                login_item.disable()
+            else:
+                login_item.enable()
+        except Exception:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("toggle launch at login failed", exc_info=True)
+
+    def toggleAutoUpdateCheck_(self, sender: Any) -> None:
+        prefs = _load_preferences()
+        enabled = not _auto_update_check_enabled(prefs)
+        prefs["auto_update_check"] = enabled
+        _save_preferences(prefs)
+        if hasattr(sender, "setState_"):
+            sender.setState_(1 if enabled else 0)
+
+    def checkUpdateNow_(self, sender: Any) -> None:
+        thread = threading.Thread(
+            target=self._check_update_in_background,
+            kwargs={"manual": True, "ignore_cooldown": True, "ignore_skipped": True},
+            daemon=True,
+        )
+        thread.start()
+
+    def _maybe_check_update_in_background(self) -> None:
+        self._check_update_in_background(
+            manual=False,
+            ignore_cooldown=False,
+            ignore_skipped=False,
+        )
+
+    def _check_update_in_background(
+        self,
+        *,
+        manual: bool,
+        ignore_cooldown: bool,
+        ignore_skipped: bool,
+    ) -> None:
+        prefs = _load_preferences()
+        if not manual and not _auto_update_check_enabled(prefs):
+            return
+        if not ignore_cooldown and _update_dismissed_recently(prefs):
+            return
+
+        try:
+            current_version = _current_version()
+            check_result = update_checker.check_latest_release_result(current_version)
+        except Exception:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("update check failed", exc_info=True)
+            if manual:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "_showUpdateCheckFailed:",
+                    None,
+                    False,
+                )
+            return
+
+        if check_result.failed:
+            if manual:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "_showUpdateCheckFailed:",
+                    None,
+                    False,
+                )
+            return
+
+        release = check_result.release
+        if release is None:
+            if manual:
+                self.performSelectorOnMainThread_withObject_waitUntilDone_(
+                    "_showNoUpdateAvailable:",
+                    None,
+                    False,
+                )
+            return
+
+        if not ignore_skipped and prefs.get("update_skipped_version") == release.version:
+            return
+
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "_showUpdateAlert:",
+            release,
+            False,
+        )
+
+    def _showUpdateAlert_(self, release: update_checker.ReleaseInfo) -> None:
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_t(self.language, "update_alert_title", version=release.version))
+        alert.setInformativeText_(release.body[:UPDATE_ALERT_BODY_LIMIT])
+        alert.addButtonWithTitle_(_t(self.language, "update_btn_download"))
+        alert.addButtonWithTitle_(_t(self.language, "update_btn_later"))
+        alert.addButtonWithTitle_(_t(self.language, "update_btn_skip"))
+        result = int(alert.runModal())
+        if result == 1000:
+            webbrowser.open(release.html_url)
+            return
+
+        prefs = _load_preferences()
+        if result == 1002:
+            prefs["update_skipped_version"] = release.version
+        else:
+            prefs["update_dismissed_at"] = time.time()
+        _save_preferences(prefs)
+
+    def _showNoUpdateAvailable_(self, result: Any) -> None:
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_t(self.language, "update_no_new_version"))
+        alert.runModal()
+
+    def _showUpdateCheckFailed_(self, result: Any) -> None:
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_t(self.language, "update_check_failed"))
+        alert.runModal()
 
     def _set_active_panel_id(self, panel_id: str) -> None:
         panel = panels.get_panel(panel_id)
@@ -274,10 +508,23 @@ class AppDelegate(NSObject):
         try:
             outcome = asyncio.run(self._fetch())
             codex_rows, codex_5h_pct = self._codex_rows()
-            state = self._state_from_outcome(outcome, codex_rows)
+            all_entries = self._load_history_entries()
+            project_rows = self._project_rows(hours_back=24, entries=all_entries)
+            project_rows_7d = self._project_rows(hours_back=168, entries=all_entries)
+            project_rows_30d = self._project_rows(hours_back=720, entries=all_entries)
+            state = self._state_from_outcome(
+                outcome,
+                codex_rows,
+                project_rows,
+                project_rows_7d,
+                project_rows_30d,
+                history_entries=all_entries,
+            )
         except Exception as exc:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("refresh failed", exc_info=True)
             codex_5h_pct = None
-            state = _error_state(type(exc).__name__, self.mock)
+            state = _error_state(type(exc).__name__, self.mock, self.language)
 
         result = {"state": state, "codex_5h_pct": codex_5h_pct}
         self.performSelectorOnMainThread_withObject_waitUntilDone_(
@@ -291,10 +538,21 @@ class AppDelegate(NSObject):
         codex_5h_pct = result["codex_5h_pct"]
         self.codex_5h_pct = codex_5h_pct
         self.latest_state = state
-        self.popover_controller.setState_(state)
+        if self.popover.isShown():
+            self.popover_controller.setState_(self.latest_state)
         self.popover.setContentSize_(_popover_size(state, self.active_panel))
+        self._inject_web_language(state.language)
         self.status_item.button().setTitle_(self._compose_title(state))
         self._refresh_in_flight = False
+
+    def _inject_web_language(self, language: str) -> None:
+        content_view = self.popover_controller.content_view
+        if not hasattr(content_view, "evaluateJavaScript_completionHandler_"):
+            return
+        content_view.evaluateJavaScript_completionHandler_(
+            f"window.usageSetLanguage && window.usageSetLanguage({json.dumps(language)})",
+            None,
+        )
 
     def _install_hook_in_background(self) -> None:
         output = io.StringIO()
@@ -324,12 +582,79 @@ class AppDelegate(NSObject):
     def _finishHookInstall_(self, result: dict[str, Any]) -> None:
         alert = NSAlert.alloc().init()
         if result["success"]:
-            alert.setMessageText_("已安裝完成，請重開 Claude Code 一次")
+            alert.setMessageText_(_t(self.language, "hook_installed_restart"))
         else:
-            alert.setMessageText_("安裝 hook 失敗")
-            alert.setInformativeText_(result["message"] or "setup_hook.setup() 回傳失敗")
+            alert.setMessageText_(_t(self.language, "hook_install_failed"))
+            alert.setInformativeText_(
+                result["message"] or _t(self.language, "hook_install_failed_default")
+            )
         alert.runModal()
         self._refresh()
+
+    def _toggle_statusline_in_background(self) -> None:
+        self._statusline_action_in_background("toggle")
+
+    def _statusline_action_in_background(self, action: str) -> None:
+        output = io.StringIO()
+        ok = True
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                if action == "toggle":
+                    _toggle_statusline_settings()
+                elif action == "uninstall":
+                    _disable_statusline_settings()
+                else:
+                    _enable_statusline_settings()
+        except SystemExit as exc:
+            if exc.code:
+                ok = False
+                print(exc.code, file=output)
+        except Exception as exc:
+            ok = False
+            print(f"{type(exc).__name__}: {exc}", file=output)
+
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "_finishStatuslineAction:",
+            {"ok": ok, "action": action, "output": output.getvalue().strip()},
+            False,
+        )
+
+    def _finishStatuslineAction_(self, result: dict[str, Any]) -> None:
+        self._refresh()
+        self._refresh_statusline_state()
+        if result.get("ok", True):
+            return
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_t(self.language, "statusline_action_failed"))
+        alert.setInformativeText_(str(result.get("output") or result.get("action") or ""))
+        alert.runModal()
+
+    def _refresh_statusline_state(self) -> None:
+        self.latest_state.statusline = _statusline_payload(self.language)
+        self.popover_controller.setState_(self.latest_state)
+
+    def _analyze_usage_in_background(self) -> None:
+        result: dict[str, str | bool]
+        try:
+            saved = _generate_analysis_report()
+            result = {"success": True, "message": saved}
+        except Exception as exc:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("analysis report failed", exc_info=True)
+            result = {"success": False, "message": f"{type(exc).__name__}: {exc}"}
+        self.performSelectorOnMainThread_withObject_waitUntilDone_(
+            "_finishAnalyzeUsage:",
+            result,
+            False,
+        )
+
+    def _finishAnalyzeUsage_(self, result: dict[str, Any]) -> None:
+        if result["success"]:
+            return
+        alert = NSAlert.alloc().init()
+        alert.setMessageText_(_t(self.language, "analysis_failed"))
+        alert.setInformativeText_(str(result["message"]))
+        alert.runModal()
 
     async def _fetch(self) -> PollOutcome:
         client = ClaudeUsageClient(mock=self.mock)
@@ -338,25 +663,49 @@ class AppDelegate(NSObject):
         finally:
             await client.aclose()
 
+    def _status_message_value(self, outcome: PollOutcome, fallback_key: str) -> str:
+        if outcome.message == "awaiting_rate_limits":
+            return _t(self.language, "awaiting_rate_limits")
+        return outcome.message or _t(self.language, fallback_key)
+
     def _state_from_outcome(
         self,
         outcome: PollOutcome,
         codex_rows: tuple[QuotaRowState, QuotaRowState],
+        projects: list[tuple[str, int, float | None]],
+        project_rows_7d: list[tuple[str, int, float | None]],
+        project_rows_30d: list[tuple[str, int, float | None]],
+        history_entries: list[UsageEntry] | None = None,
     ) -> PopoverState:
         now = time.time()
-        today_text = _today_title(self.mock)
-        group_name = GROUP_NAMES[self.tracker.group()]
-        status_text = f"狀態：{outcome.message or '載入中'}"
+        today_text = _today_title(self.mock, self.language, entries=history_entries)
+        group_name = _group_name(self.tracker.group(), self.language)
+        status_text = _t(
+            self.language,
+            "status_text",
+            value=self._status_message_value(outcome, "status_loading"),
+        )
 
         if outcome.state == PollState.SUCCESS and outcome.snapshot is not None:
             snapshot = outcome.snapshot
-            group_name = GROUP_NAMES[self.tracker.group()]
+            if snapshot.current_percent is not None:
+                self.burn_rate_trackers["claude_session"].record(
+                    snapshot.polled_at,
+                    float(snapshot.current_percent),
+                )
+            if snapshot.weekly_percent is not None:
+                self.burn_rate_trackers["claude_weekly"].record(
+                    snapshot.polled_at,
+                    float(snapshot.weekly_percent),
+                )
             claude_session = _quota_row(
                 "Session",
                 float(snapshot.current_percent) if snapshot.current_percent is not None else None,
                 snapshot.current_reset_at,
                 now,
                 CLAUDE_COLOR,
+                self.language,
+                forecast_seconds=self.burn_rate_trackers["claude_session"].forecast_seconds(),
             )
             claude_weekly = _quota_row(
                 "Weekly",
@@ -364,30 +713,68 @@ class AppDelegate(NSObject):
                 snapshot.weekly_reset_at,
                 now,
                 CLAUDE_COLOR,
+                self.language,
+                forecast_seconds=self.burn_rate_trackers["claude_weekly"].forecast_seconds(),
+                warning_max_seconds=24 * 3600,
             )
-            status_text = f"狀態：{outcome.message or '✓ 已同步'}"
+            status_value = outcome.message or _t(self.language, "status_synced")
+            if snapshot.is_stale or snapshot.data_source != "hook":
+                status_value = _t(self.language, "data_stale_hint")
+            status_text = _t(
+                self.language,
+                "status_text",
+                value=status_value,
+            )
         else:
-            claude_session = _missing_row("Session", CLAUDE_COLOR)
-            claude_weekly = _missing_row("Weekly", CLAUDE_COLOR)
-            status_text = f"狀態：{outcome.message or '無資料'}"
+            claude_session = _missing_row("Session", CLAUDE_COLOR, self.language)
+            claude_weekly = _missing_row("Weekly", CLAUDE_COLOR, self.language)
+            status_text = _t(
+                self.language,
+                "status_text",
+                value=self._status_message_value(outcome, "status_no_data"),
+            )
 
         return PopoverState(
+            language=self.language,
             claude_session=claude_session,
             claude_weekly=claude_weekly,
             codex_session=codex_rows[0],
             codex_weekly=codex_rows[1],
-            rate_text=f"速率：{group_name}",
+            projects=projects,
+            projects_7d=project_rows_7d,
+            projects_30d=project_rows_30d,
+            rate_text=_t(self.language, "rate_text", value=group_name),
             status_text=status_text,
             today_text=today_text,
+            statusline=_statusline_payload(self.language),
             show_install_button=outcome.state == PollState.TOKEN_ERROR,
         )
 
     def _codex_rows(self) -> tuple[tuple[QuotaRowState, QuotaRowState], int | None]:
         if self.mock:
             now = time.time()
+            self.burn_rate_trackers["codex_session"].record(now, 12.0)
+            self.burn_rate_trackers["codex_weekly"].record(now, 28.0)
             rows = (
-                _quota_row("Session", 12.0, now + (4 * 3600) + (15 * 60), now, CODEX_COLOR),
-                _quota_row("Weekly", 28.0, now + (4 * 86400), now, CODEX_COLOR),
+                _quota_row(
+                    "Session",
+                    12.0,
+                    now + (4 * 3600) + (15 * 60),
+                    now,
+                    CODEX_COLOR,
+                    self.language,
+                    forecast_seconds=self.burn_rate_trackers["codex_session"].forecast_seconds(),
+                ),
+                _quota_row(
+                    "Weekly",
+                    28.0,
+                    now + (4 * 86400),
+                    now,
+                    CODEX_COLOR,
+                    self.language,
+                    forecast_seconds=self.burn_rate_trackers["codex_weekly"].forecast_seconds(),
+                    warning_max_seconds=24 * 3600,
+                ),
             )
             return rows, 12
 
@@ -399,13 +786,20 @@ class AppDelegate(NSObject):
             rate_limits = None
 
         if rate_limits is None:
-            rows = _missing_row("Session", CODEX_COLOR), _missing_row("Weekly", CODEX_COLOR)
+            rows = (
+                _missing_row("Session", CODEX_COLOR, self.language),
+                _missing_row("Weekly", CODEX_COLOR, self.language),
+            )
             return rows, None
 
         now = time.time()
         codex_5h_pct = (
             round(rate_limits.five_hour_pct) if rate_limits.five_hour_pct is not None else None
         )
+        if rate_limits.five_hour_pct is not None:
+            self.burn_rate_trackers["codex_session"].record(now, rate_limits.five_hour_pct)
+        if rate_limits.seven_day_pct is not None:
+            self.burn_rate_trackers["codex_weekly"].record(now, rate_limits.seven_day_pct)
         rows = (
             _quota_row(
                 "Session",
@@ -413,6 +807,8 @@ class AppDelegate(NSObject):
                 rate_limits.five_hour_resets_at,
                 now,
                 CODEX_COLOR,
+                self.language,
+                forecast_seconds=self.burn_rate_trackers["codex_session"].forecast_seconds(),
             ),
             _quota_row(
                 "Weekly",
@@ -420,13 +816,86 @@ class AppDelegate(NSObject):
                 rate_limits.seven_day_resets_at,
                 now,
                 CODEX_COLOR,
+                self.language,
+                forecast_seconds=self.burn_rate_trackers["codex_weekly"].forecast_seconds(),
+                warning_max_seconds=24 * 3600,
             ),
         )
         return rows, codex_5h_pct
 
+    def _load_history_entries(self) -> list[UsageEntry]:
+        if self.mock:
+            return []
+        try:
+            return load_entries(hours_back=720)
+        except Exception:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("project usage load failed", exc_info=True)
+            return []
+
+    def _project_rows(
+        self,
+        hours_back: int = 24,
+        entries: list[UsageEntry] | None = None,
+    ) -> list[tuple[str, int, float | None]]:
+        if self.mock:
+            if hours_back <= 24:
+                return [
+                    ("usage", 11_200_000, 6.47),
+                    ("FinMind", 3_100_000, 1.82),
+                    ("AI客服", 800_000, 0.48),
+                ]
+            if hours_back <= 168:
+                return [
+                    ("usage", 78_400_000, 45.20),
+                    ("FinMind", 21_700_000, 12.74),
+                    ("AI客服", 5_600_000, 3.36),
+                ]
+            return [
+                ("usage", 312_000_000, 180.50),
+                ("FinMind", 86_400_000, 50.12),
+                ("AI客服", 22_000_000, 13.20),
+            ]
+
+        if entries is None:
+            try:
+                resolved = load_entries(hours_back=hours_back)
+            except Exception:
+                if os.environ.get("USAGE_DEBUG") == "1":
+                    logger.warning("project usage load failed", exc_info=True)
+                return []
+        else:
+            cutoff = datetime.now(tz=UTC) - timedelta(hours=hours_back)
+            resolved = [e for e in entries if e.timestamp >= cutoff]
+
+        aggregates: dict[str, list[float]] = {}
+        for entry in resolved:
+            bucket = aggregates.setdefault(entry.project, [0.0, 0.0])
+            bucket[0] += entry.total_tokens
+            bucket[1] += calculate_cost(entry)
+
+        ranked = sorted(
+            aggregates.items(),
+            key=lambda item: (int(item[1][0]), item[0]),
+            reverse=True,
+        )
+        rows: list[tuple[str, int, float | None]] = []
+        for project, (tokens, cost) in ranked[:3]:
+            rows.append(
+                (
+                    project,
+                    int(tokens),
+                    cost,
+                )
+            )
+        return rows
+
     def _compose_title(self, state: PopoverState) -> str:
-        claude_text = state.claude_session.percent_text.replace(" 已用", "")
-        base = "🐾 --" if claude_text == "--" else f"🐾 {claude_text}"
+        base = (
+            "🐾 --"
+            if state.claude_session.percent is None
+            else f"🐾 {_format_percent(state.claude_session.percent)}%"
+        )
         if self.codex_5h_pct is None:
             return base
         return f"{base} · 📜 {self.codex_5h_pct}%"
@@ -440,6 +909,16 @@ def run_app(mock: bool = False, interval: int = 60) -> None:
     app.run()
 
 
+def _generate_analysis_report(period: str = "month") -> str:
+    from adapters.registry import detect_agents
+    from analyzer.reporter import build_report_data
+    from ui.html_report import save_and_open
+
+    agents = detect_agents()
+    data = build_report_data(agents, period)
+    return cast(str, save_and_open(data))
+
+
 def _popover_size(state: PopoverState, panel: UsagePanel | None = None) -> Any:
     active_panel = panel if panel is not None else panels.get_panel("classic")
     width, base_height = active_panel.preferred_size()
@@ -447,23 +926,32 @@ def _popover_size(state: PopoverState, panel: UsagePanel | None = None) -> Any:
     return NSMakeSize(width, height)
 
 
-def _empty_state() -> PopoverState:
+def _empty_state(language: str = "en") -> PopoverState:
     return PopoverState(
-        claude_session=_missing_row("Session", CLAUDE_COLOR),
-        claude_weekly=_missing_row("Weekly", CLAUDE_COLOR),
-        codex_session=_missing_row("Session", CODEX_COLOR),
-        codex_weekly=_missing_row("Weekly", CODEX_COLOR),
-        rate_text="速率：--",
-        status_text="狀態：載入中",
-        today_text="今日：$0.00 (0 tokens)",
+        language=language,
+        claude_session=_missing_row("Session", CLAUDE_COLOR, language),
+        claude_weekly=_missing_row("Weekly", CLAUDE_COLOR, language),
+        codex_session=_missing_row("Session", CODEX_COLOR, language),
+        codex_weekly=_missing_row("Weekly", CODEX_COLOR, language),
+        projects=[],
+        projects_7d=[],
+        projects_30d=[],
+        rate_text=_t(language, "rate_text", value="--"),
+        status_text=_t(language, "status_text", value=_t(language, "status_loading")),
+        today_text=_t(language, "today_text", cost="0.00", tokens="0"),
+        statusline=_statusline_payload(language),
         show_install_button=False,
     )
 
 
-def _error_state(message: str, mock: bool) -> PopoverState:
-    state = _empty_state()
-    state.status_text = f"狀態：錯誤 ({message})"
-    state.today_text = _today_title(mock)
+def _error_state(message: str, mock: bool, language: str = "en") -> PopoverState:
+    state = _empty_state(language)
+    state.status_text = _t(
+        language,
+        "status_text",
+        value=_t(language, "status_error", message=message),
+    )
+    state.today_text = _today_title(mock, language)
     state.show_install_button = False
     return state
 
@@ -474,47 +962,202 @@ def _quota_row(
     resets_at: float | None,
     now: float,
     color: tuple[float, float, float],
+    language: str = "en",
+    forecast_seconds: float | None = None,
+    warning_max_seconds: float | None = None,
 ) -> QuotaRowState:
     if pct is None or resets_at is None:
-        return _missing_row(title, color)
+        return _missing_row(title, color, language)
     pct = max(0.0, min(100.0, float(pct)))
+    time_to_reset = resets_at - now
+    warning_seconds: float | None = None
+    if (
+        forecast_seconds is not None
+        and 0 < forecast_seconds < time_to_reset
+        and (warning_max_seconds is None or forecast_seconds < warning_max_seconds)
+        and pct >= WARNING_PERCENT_FLOOR
+    ):
+        warning_seconds = forecast_seconds
+    warning = warning_seconds is not None
+    if warning_seconds is not None:
+        reset_text = _t(
+            language,
+            "burn_warning",
+            empty=format_human_time(warning_seconds, language),
+            reset=format_human_time(time_to_reset, language),
+        )
+    else:
+        reset_text = _t(language, "reset_in", time=format_human_time(time_to_reset, language))
     return QuotaRowState(
         title=title,
         percent=pct,
-        percent_text=f"{_format_percent(pct)}% 已用",
-        reset_text=f"重置 {format_human_time(resets_at - now)}",
+        percent_text=_t(language, "percent_used", value=_format_percent(pct)),
+        reset_text=reset_text,
         color=_bar_color(pct, color),
+        warning=warning,
         available=True,
     )
 
 
-def _missing_row(title: str, color: tuple[float, float, float]) -> QuotaRowState:
+def _missing_row(
+    title: str,
+    color: tuple[float, float, float],
+    language: str = "en",
+) -> QuotaRowState:
     return QuotaRowState(
         title=title,
         percent=None,
         percent_text="--",
-        reset_text="重置 --",
+        reset_text=_t(language, "reset_placeholder"),
         color=color,
         available=False,
     )
 
 
-def _today_title(mock: bool = False) -> str:
-    if mock:
-        return "今日：$45.20 (50,193,442 tokens)"
+def _statusline_payload(language: str) -> dict[str, object]:
+    return {
+        "enabled": _statusline_enabled(),
+        "enabledText": _t(language, "cli_enabled"),
+        "disabledText": _t(language, "cli_disabled"),
+    }
 
-    today = datetime.now().astimezone().date()
-    total_tokens = 0
-    total_cost = 0.0
 
-    entries = load_entries(hours_back=24) + codex_loader.load_entries(hours_back=24)
-    for entry in entries:
-        if entry.timestamp.astimezone().date() != today:
+def _claude_settings_path() -> Path:
+    return Path(os.path.expanduser("~/.claude/settings.json"))
+
+
+def _load_claude_settings() -> dict[str, Any]:
+    settings_path = _claude_settings_path()
+    if not settings_path.exists():
+        return {}
+    with settings_path.open(encoding="utf-8") as file:
+        settings = json.load(file)
+    if not isinstance(settings, dict):
+        raise ValueError(f"{settings_path} must be a JSON object")
+    return settings
+
+
+def _save_claude_settings(settings: dict[str, Any]) -> None:
+    settings_path = _claude_settings_path()
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    trailing_newline = True
+    with contextlib.suppress(OSError):
+        trailing_newline = settings_path.read_bytes().endswith(b"\n")
+    tmp_path: str | None = None
+    try:
+        fd, tmp_path = tempfile.mkstemp(dir=settings_path.parent, suffix=".tmp")
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            json.dump(settings, file, indent=2, ensure_ascii=False)
+            if trailing_newline:
+                file.write("\n")
+        os.replace(tmp_path, settings_path)
+        tmp_path = None
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+
+def _statusline_command_target_exists(statusline: object) -> bool:
+    if not isinstance(statusline, dict):
+        return True
+    command = statusline.get("command")
+    if not isinstance(command, str):
+        return True
+    try:
+        parts = shlex.split(command)
+    except ValueError:
+        return True
+    for part in parts:
+        if "statusline" not in part or not part.endswith(".py"):
             continue
-        total_tokens += entry.total_tokens
-        total_cost += calculate_cost(entry)
+        return Path(os.path.expanduser(part)).exists()
+    return True
 
-    return f"今日：${total_cost:.2f} ({total_tokens:,} tokens)"
+
+def _disable_statusline_settings() -> int:
+    settings = _load_claude_settings()
+    if "statusLine" not in settings:
+        return 0
+    usage_settings = settings.setdefault("usage", {})
+    if not isinstance(usage_settings, dict):
+        usage_settings = {}
+        settings["usage"] = usage_settings
+    usage_settings["previousStatusLine"] = settings["statusLine"]
+    del settings["statusLine"]
+    _save_claude_settings(settings)
+    return 0
+
+
+def _enable_statusline_settings() -> int:
+    settings = _load_claude_settings()
+    if "statusLine" in settings:
+        return 0
+    raw_usage_settings = settings.get("usage")
+    usage_settings = raw_usage_settings if isinstance(raw_usage_settings, dict) else None
+    previous = usage_settings.get("previousStatusLine") if usage_settings is not None else None
+    if previous:
+        assert usage_settings is not None
+        if not _statusline_command_target_exists(previous):
+            del usage_settings["previousStatusLine"]
+            if not usage_settings:
+                del settings["usage"]
+            _save_claude_settings(settings)
+            import setup_hook
+
+            return setup_hook.setup()
+        settings["statusLine"] = previous
+        del usage_settings["previousStatusLine"]
+        if not usage_settings:
+            del settings["usage"]
+        _save_claude_settings(settings)
+        return 0
+
+    import setup_hook
+
+    return setup_hook.setup()
+
+
+def _toggle_statusline_settings() -> tuple[str, int]:
+    if _statusline_enabled():
+        return "uninstall", _disable_statusline_settings()
+    return "install", _enable_statusline_settings()
+
+
+def _statusline_enabled() -> bool:
+    try:
+        settings = _load_claude_settings()
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    return "statusLine" in settings
+
+
+def _today_title(
+    mock: bool = False,
+    language: str = "en",
+    entries: list[UsageEntry] | None = None,
+) -> str:
+    if mock:
+        return _t(language, "today_text", cost="45.20", tokens="50,193,442")
+
+    try:
+        today = datetime.now().astimezone().date()
+        total_tokens = 0
+        total_cost = 0.0
+
+        history = entries if entries is not None else load_entries(hours_back=24)
+        all_entries = list(history) + codex_loader.load_entries(hours_back=24)
+        for entry in all_entries:
+            if entry.timestamp.astimezone().date() != today:
+                continue
+            total_tokens += entry.total_tokens
+            total_cost += calculate_cost(entry)
+    except Exception:
+        if os.environ.get("USAGE_DEBUG") == "1":
+            logger.warning("today totals load failed", exc_info=True)
+        return _t(language, "today_text", cost="0.00", tokens="0")
+
+    return _t(language, "today_text", cost=f"{total_cost:.2f}", tokens=f"{total_tokens:,}")
 
 
 def _format_percent(value: float) -> str:

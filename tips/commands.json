@@ -1,0 +1,380 @@
+{
+  "commands": [
+    {
+      "id": "compact",
+      "command": "/compact",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "壓縮對話節省 token",
+          "what": "把你目前跟 Claude 的對話『壓縮』成一份摘要。重要的決定、討論結論、寫過的 code 重點都會保留；中間 debug 走過的歪路、改了又改的提示則被刪掉。",
+          "when": "對話超過 100 輪、或你發現 Claude 回應變慢、開始忘事的時候。Claude Code 視窗左下角會顯示 context 剩餘比例，剩 20% 以下就建議壓一次。",
+          "how": "在 Claude Code 對話框直接打 /compact 按 Enter。Claude 會花幾秒讀完所有對話、產出一份摘要，然後用摘要取代原對話——你下一句話送過去時，Claude 看到的只剩摘要 + 你的新問題。",
+          "note": "**保留**：你正在做什麼專案、架構決定、上次修過哪些 bug 的結論。**丟掉**：中間試錯的對話、重複的指令、debug 過程的細節。",
+          "scenario": "你跟 Claude 討論架構 3 小時、寫了 500 行 code、解了 5 個 bug。對話累積到 80 輪、context 剩 25%。這時打 /compact——下次問『我們之前討論的 X 函式怎麼寫的？』Claude 仍答得出來，但那 5 個 debug 過程不會再吃 context。"
+        },
+        "zh-CN": {
+          "title": "压缩对话，省下 token",
+          "what": "把你现在和 Claude 的整段对话“压缩”成一份摘要。重要决定、讨论结论、写过的代码重点会保留下来；中间那些绕路的 debug 过程、改了又改的提示词，会被删掉。",
+          "when": "当对话超过 100 轮，或者你感觉 Claude 回得变慢、开始忘前面讲过什么时就可以用。Claude Code 窗口左下角会显示 context 剩余比例，低于 20% 时就很适合先压一次。",
+          "how": "直接在 Claude Code 对话框输入 /compact，然后按 Enter。Claude 会花几秒把前面的对话读完，生成一份摘要，再用这份摘要替换原本的长对话。你下一句发出去时，Claude 看到的就只剩摘要加上你的新问题。",
+          "note": "**保留**：你正在做什么项目、架构上的决定、之前修过哪些 bug 的结论。**丢掉**：中间试错的对话、重复的指令、debug 过程的细节。",
+          "scenario": "你和 Claude 讨论架构讨论了 3 小时，写了 500 行代码，还修了 5 个 bug。对话已经累积到 80 轮，context 只剩 25%。这时输入 /compact，下一次你再问“我们之前讨论的 X 函数怎么写来着？”，Claude 还是答得出来，但那 5 段 debug 过程不会继续占用 context。"
+        },
+        "en": {
+          "title": "Compress the chat to save tokens",
+          "what": "This turns your current conversation with Claude into a shorter summary. The important decisions, final conclusions, and key code you wrote stay in place; the messy debugging detours and prompts you kept rewriting get dropped.",
+          "when": "Use it when your chat goes past 100 turns, or when Claude starts replying more slowly and forgetting earlier details. In Claude Code, the lower-left corner shows how much context is left. If it drops under 20%, it is a good time to compact.",
+          "how": "Type /compact directly in the Claude Code chat box and press Enter. Claude will spend a few seconds reading the whole conversation, create a summary, and replace the original chat with that summary. When you send your next message, Claude only sees the summary plus your new question.",
+          "note": "**Keep**: what project you are working on, architecture decisions, and the conclusions from bugs you already fixed. **Drop**: trial-and-error chat, repeated commands, and the detailed step-by-step debugging process.",
+          "scenario": "You spent 3 hours discussing architecture with Claude, wrote 500 lines of code, and fixed 5 bugs. The conversation is now 80 turns long, and your remaining context is down to 25%. You run /compact. Later, if you ask, “How did we say that X function should work?”, Claude can still answer, but those 5 debugging detours no longer take up context."
+        },
+        "ja": {
+          "title": "会話を圧縮して token を節約",
+          "what": "いま Claude と話している内容を、短い要約にまとめ直す機能です。大事な判断、話し合いの結論、書いたコードの要点は残り、途中の遠回りした debug や何度も言い直した指示は削られます。",
+          "when": "会話が 100 往復を超えたときや、Claude の返答が遅くなったり、前の内容を忘れ始めたりしたときに使います。Claude Code の左下には残り context の割合が出るので、20% を切ったら一度 compact するのがおすすめです。",
+          "how": "Claude Code の会話欄で /compact と入力して Enter を押します。Claude が数秒かけて会話全体を読み、要約を作って、その要約で元の長い会話を置き換えます。次のメッセージを送る時点では、Claude が見るのは要約とあなたの新しい質問だけです。",
+          "note": "**残るもの**：いま何のプロジェクトをしているか、アーキテクチャの判断、前に直した bug の結論。**消えるもの**：試行錯誤の会話、重複した指示、debug 手順の細かい流れ。",
+          "scenario": "Claude と 3 時間アーキテクチャを相談し、500 行のコードを書いて、5 個の bug を直したとします。会話は 80 往復まで増え、残り context は 25%。ここで /compact を使えば、その後に「前に話した X 関数の形ってどうするんだっけ？」と聞いても Claude は答えられますが、5 回分の debug の寄り道までは持ち続けません。"
+        },
+        "ko": {
+          "title": "대화를 압축해서 token 아끼기",
+          "what": "지금까지 Claude와 나눈 대화를 더 짧은 요약으로 압축해 줍니다. 중요한 결정, 논의한 결론, 작성한 코드의 핵심은 남고, 중간에 헤맸던 debug 과정이나 여러 번 고쳐 쓴 프롬프트는 빠집니다.",
+          "when": "대화가 100턴을 넘었거나, Claude가 답을 늦게 하거나 앞 내용을 잘 잊기 시작할 때 쓰면 좋습니다. Claude Code 창 왼쪽 아래에는 남은 context 비율이 보이는데, 20% 아래로 내려가면 한 번 압축할 타이밍입니다.",
+          "how": "Claude Code 대화창에 /compact 를 입력하고 Enter를 누르면 됩니다. Claude가 몇 초 동안 전체 대화를 읽고 요약을 만든 뒤, 원래 긴 대화를 그 요약으로 바꿉니다. 그다음 메시지를 보낼 때 Claude가 보는 것은 요약과 새 질문뿐입니다.",
+          "note": "**남는 것**: 지금 어떤 프로젝트를 하는지, 아키텍처 결정, 전에 고친 bug의 결론. **빠지는 것**: 시행착오 대화, 반복된 명령, debug 과정의 세부 흐름.",
+          "scenario": "Claude와 3시간 동안 아키텍처를 논의하고, 코드 500줄을 쓰고, bug 5개를 해결했다고 해 봅시다. 대화가 80턴까지 쌓였고 남은 context는 25%입니다. 이때 /compact 를 실행하면, 나중에 “우리가 전에 얘기한 X 함수는 어떻게 만들기로 했지?”라고 물어도 Claude는 답할 수 있지만, 그 5번의 debug 우회 과정까지 계속 들고 있지는 않습니다."
+        }
+      }
+    },
+    {
+      "id": "clear",
+      "command": "/clear",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "清空對話，換新任務再開始",
+          "what": "把目前這段對話歷史清掉，讓 Claude 從乾淨的 context 重新開始。它不是刪專案檔案，也不是還原 code，只是把眼前這串聊天歸零。",
+          "when": "你剛做完一個任務，準備切到完全不同的工作時最適合用。官方也把它列成控制 token 使用的方法之一，避免前一個主題的長對話繼續佔 context。",
+          "how": "在對話框輸入 /clear 並送出。之後你要重新描述眼前任務，Claude 會把它當成一段新的對話來看，而不是延續上一個 bug 或功能的上下文。",
+          "note": "**保留**：磁碟上的程式碼、你已經寫進 CLAUDE.md 的規則。**不保留**：目前這串聊天裡的臨時脈絡、前一題的指令往返、剛剛貼過的 log。",
+          "scenario": "你前 1 小時都在追一個 test failure，接下來要改 README 和 release note。這兩件事幾乎無關，這時先打 /clear，再開始新需求，Claude 比較不會一直把剛才的 stack trace 當重點。"
+        },
+        "zh-CN": {
+          "title": "清空对话，换个任务重新开始",
+          "what": "把当前这段对话历史清掉，让 Claude 从干净的 context 重新开始。它不会删除项目文件，也不会回滚代码，只是把眼前这串聊天归零。",
+          "when": "刚做完一个任务，准备切到完全不同的工作时最适合用。官方也把它列为控制 token 使用的方法之一，避免上一个主题的长对话继续占用 context。",
+          "how": "在对话框输入 /clear 并发送。之后你要重新描述当前任务，Claude 会把它当成一段新的对话来看，而不是继续沿用上一个 bug 或功能的上下文。",
+          "note": "**保留**：磁盘上的代码、你已经写进 CLAUDE.md 的规则。**不保留**：当前这串聊天里的临时脉络、上一题的命令往返、刚刚贴过的 log。",
+          "scenario": "你前 1 小时都在追一个 test failure，接下来要改 README 和 release note。这两件事几乎无关，这时先打 /clear，再开始新需求，Claude 就不容易一直把刚才的 stack trace 当成重点。"
+        },
+        "en": {
+          "title": "Clear the chat before a new task",
+          "what": "This wipes the current conversation history so Claude starts again from a clean context. It does not delete project files or undo code changes; it only resets the active chat thread in front of you.",
+          "when": "Use it after you finish one task and are about to switch to something unrelated. Anthropic also lists it as one way to reduce token usage, because an old topic does not keep consuming context in the next task.",
+          "how": "Type /clear in the chat and send it. After that, restate the task you want to work on. Claude will treat it as a fresh conversation instead of continuing from the previous bug, feature, or log trail.",
+          "note": "**Keeps**: the code on disk and any rules you already saved into CLAUDE.md. **Clears**: the temporary context from this chat, the back-and-forth from the previous task, and the logs you just pasted here.",
+          "scenario": "You spent the last hour chasing a test failure, and now you want to rewrite a README and release notes. Those tasks barely overlap. Run /clear first, then start the new task, and Claude is less likely to keep anchoring on the old stack trace."
+        },
+        "ja": {
+          "title": "会話を消して新しい作業に切り替える",
+          "what": "いまの会話履歴を消して、Claude をまっさらな context から再開させるコマンドです。プロジェクトのファイルを削除するわけでも、コードを巻き戻すわけでもなく、目の前の会話だけをリセットします。",
+          "when": "ひとつの作業が終わって、まったく別のタスクに移るときに向いています。公式にも token 使用量を抑える方法のひとつとして挙げられていて、前の話題の長い会話を次に持ち込まないためです。",
+          "how": "会話欄で /clear と入力して送信します。そのあとで、いま取り組みたい内容をあらためて説明します。Claude は前の bug や機能の続きを見るのではなく、新しい会話として扱います。",
+          "note": "**残るもの**：ディスク上のコード、すでに CLAUDE.md に書いたルール。**消えるもの**：この会話の一時的な文脈、前のタスクのやり取り、さっき貼った log。",
+          "scenario": "この 1 時間は test failure を追っていたけれど、次は README と release note を直したい、という場面を考えてください。話題がほぼ別物なら、先に /clear してから新しい依頼を始めた方が、Claude が古い stack trace に引っぱられにくくなります。"
+        },
+        "ko": {
+          "title": "대화를 비우고 새 작업으로 시작하기",
+          "what": "현재 대화 기록을 지워서 Claude가 깨끗한 context에서 다시 시작하게 합니다. 프로젝트 파일을 지우거나 코드를 되돌리는 기능은 아니고, 지금 눈앞의 채팅 흐름만 초기화합니다.",
+          "when": "한 작업을 끝내고 전혀 다른 일로 넘어갈 때 쓰기 좋습니다. 공식 문서에서도 token 사용을 줄이는 방법 중 하나로 소개되는데, 이전 주제의 긴 대화가 다음 작업의 context를 계속 먹지 않게 하기 위해서입니다.",
+          "how": "대화창에 /clear 를 입력해서 보내면 됩니다. 그다음 현재 하고 싶은 일을 다시 설명하세요. Claude는 이전 bug나 기능의 연장선이 아니라 새로운 대화로 받아들입니다.",
+          "note": "**남는 것**: 디스크에 있는 코드, 이미 CLAUDE.md 에 저장한 규칙. **사라지는 것**: 이 채팅의 임시 맥락, 이전 작업의 왕복 대화, 방금 붙여 넣은 log.",
+          "scenario": "지난 1시간 동안 test failure 를 추적했고, 이제 README 와 release note 를 손보려는 상황을 떠올려 보세요. 거의 겹치지 않는 작업이라면 먼저 /clear 를 실행한 뒤 새 요청을 시작하는 편이, Claude가 아까 stack trace 에 계속 매달리지 않게 해 줍니다."
+        }
+      }
+    },
+    {
+      "id": "resume",
+      "command": "/resume",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "從舊對話挑一段接著做",
+          "what": "這個指令是拿來恢復先前對話的。它對應到官方文件裡的 resume 工作流：不是直接跳回最近一段，而是先打開一個對話選擇器，讓你挑要接續哪一段舊任務。",
+          "when": "你知道要回去某一段較早的工作，不是單純接上次最後一個 session 時就該用。像是同時開過幾個任務、想回頭撿特定 bug、或要找某次重構到一半的脈絡，resume 比 continue 更準。",
+          "how": "輸入 /resume 後，從清單裡選擇你要恢復的對話。官方文件說選擇器會顯示對話開始時間、初始提示或摘要、以及訊息數量；選好後再按 Enter 接回原本那段脈絡。",
+          "note": "**適合用在**：你需要挑指定舊對話時。**不適合用在**：你只是想無腦接最近一次工作；那種情況直接用 continue 類工作流會更快。",
+          "scenario": "你這週同時做了登入 bug、CI 修復、與文件整理三條線。今天想回去前天那段『只做到一半的 CI 問題』，這時用 /resume 先看清單再挑對話，比直接接最近一次 session 更不容易接錯。"
+        },
+        "zh-CN": {
+          "title": "从旧对话里挑一段继续做",
+          "what": "这个命令用来恢复之前的对话。它对应官方文档里的 resume 工作流：不是直接跳回最近一段，而是先打开一个对话选择器，让你挑要继续哪一段旧任务。",
+          "when": "当你明确知道要回到某个较早的任务，而不是单纯接上一次最后一个 session 时就该用。比如你同时开过几个任务、想回头捡某个 bug、或者要找某次重构做到一半的上下文，resume 会比 continue 更准。",
+          "how": "输入 /resume 后，从列表里选择你要恢复的对话。官方文档说选择器会显示对话开始时间、初始提示或摘要，以及消息数量；选好之后按 Enter，就能接回原本那段脉络。",
+          "note": "**适合用在**：你需要挑指定旧对话时。**不适合用在**：你只是想无脑接上最近一次工作；那种情况直接用 continue 类工作流会更快。",
+          "scenario": "你这周同时做了登录 bug、CI 修复和文档整理三条线。今天想回到前天那段“只做到一半的 CI 问题”，这时先用 /resume 看清单再选对话，会比直接接最近一次 session 更不容易接错。"
+        },
+        "en": {
+          "title": "Pick an older conversation and keep going",
+          "what": "This command is for resuming a previous conversation. It maps to Anthropic’s resume workflow: instead of jumping straight into the latest session, it first opens a conversation picker so you can choose which earlier task to continue.",
+          "when": "Use it when you know you need a specific older thread rather than simply picking up the most recent session. If you had several tasks in flight and want the half-finished bug, refactor, or investigation from before, resume is more precise than continue.",
+          "how": "Type /resume and choose the conversation you want from the list. Anthropic’s workflow guide says the picker shows the conversation start time, the initial prompt or summary, and the message count. After you select one, press Enter and continue from that context.",
+          "note": "**Best for**: selecting a specific earlier thread. **Not best for**: blindly reopening the latest thing you touched; a continue-style workflow is faster when recency is all you need.",
+          "scenario": "This week you touched a login bug, a CI fix, and some documentation work in parallel. Today you want the CI thread you left half-finished two days ago. /resume lets you inspect the list and choose that exact conversation instead of attaching to whatever happened last."
+        },
+        "ja": {
+          "title": "前の会話を選んで続きから始める",
+          "what": "このコマンドは、以前の会話を再開するためのものです。公式の resume ワークフローに対応していて、最新の会話へ即座に戻るのではなく、まず会話ピッカーを開いて、どの古いタスクを続けるかを選べます。",
+          "when": "単に直前の session に戻るのではなく、少し前の特定タスクへ戻りたいときに使います。複数の作業を並行していて、途中だった bug 修正や refactor、調査の流れを正確に拾いたいなら、resume の方が continue より向いています。",
+          "how": "/resume と入力したあと、一覧から再開したい会話を選びます。公式ガイドでは、ピッカーに開始時刻、最初のプロンプトまたは要約、メッセージ数が表示されると説明されています。選んで Enter を押せば、その文脈に戻れます。",
+          "note": "**向いている場面**：特定の古い会話を選びたいとき。**向いていない場面**：直近の作業をそのまま開ければ十分なとき。その場合は continue 系の方が速いです。",
+          "scenario": "今週、ログイン bug、CI 修正、ドキュメント整理を並行していたとします。今日は一昨日の『途中で止まった CI 問題』に戻りたい。そんなときは /resume で一覧を見て、その会話を選ぶ方が、直近の session に誤ってつながるより安全です。"
+        },
+        "ko": {
+          "title": "예전 대화를 골라서 이어서 하기",
+          "what": "이 명령은 이전 대화를 다시 여는 용도입니다. 공식 resume 워크플로우와 맞물려 있으며, 가장 최근 session 으로 바로 점프하는 대신 먼저 대화 선택기를 열어 어느 옛 작업을 이어갈지 고를 수 있게 해 줍니다.",
+          "when": "단순히 직전 session 이 아니라 특정한 예전 작업으로 돌아가야 할 때 쓰세요. 여러 작업을 병행했고, 중간에 멈춘 bug 수정이나 refactor, 조사 흐름 중 하나를 정확히 집어야 한다면 resume 가 continue 보다 더 정확합니다.",
+          "how": "/resume 를 입력한 뒤 목록에서 이어갈 대화를 고르세요. 공식 가이드에 따르면 선택기에는 대화 시작 시간, 초기 프롬프트 또는 요약, 메시지 수가 표시됩니다. 하나를 선택하고 Enter 를 누르면 그 맥락으로 다시 들어갑니다.",
+          "note": "**잘 맞는 경우**: 특정한 옛 대화를 골라야 할 때. **덜 맞는 경우**: 그냥 가장 최근 작업만 다시 열면 될 때. 그런 경우에는 continue 류 흐름이 더 빠릅니다.",
+          "scenario": "이번 주에 로그인 bug, CI 수정, 문서 정리를 동시에 건드렸다고 해 봅시다. 오늘은 이틀 전에 반쯤 하다 멈춘 CI 문제로 돌아가고 싶습니다. 이럴 때 /resume 으로 목록을 보고 정확한 대화를 고르는 편이, 마지막 session 에 무작정 붙는 것보다 안전합니다."
+        }
+      }
+    },
+    {
+      "id": "claude-continue",
+      "command": "claude --continue",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "直接接上最近一次對話",
+          "what": "這個 CLI 指令會自動恢復你最近一次的 Claude Code 對話。官方文件把它跟 resume 分開講：continue 不會先問你要哪一段，而是直接把最近的那段工作接回來。",
+          "when": "你昨天做到一半、今天只想原地續做，而且最近一次 session 就是你要的那段時最適合用。它比先開選單再挑對話更快，也適合你明確知道『我要接的就是上一段』的情境。",
+          "how": "在 terminal 直接跑 `claude --continue`。如果你是腳本或非互動流程，官方文件也示範 `claude --continue --print \"Continue with my task\"` 這種寫法，讓它用非互動方式接回最近對話。",
+          "note": "**優點**：快，沒有選單。**限制**：它只接最近一次；如果你最近開過別的任務，continue 可能會把你帶回錯的脈絡，這時就該改用 resume。",
+          "scenario": "你昨晚做到一半就離開，今天回來只想把同一個 refactor 收完，而且中間沒再開別的任務。直接跑 `claude --continue`，比先找對話清單再選一次更省步驟。"
+        },
+        "zh-CN": {
+          "title": "直接接上最近一次对话",
+          "what": "这个 CLI 命令会自动恢复你最近一次的 Claude Code 对话。官方文档把它和 resume 分开讲：continue 不会先问你要哪一段，而是直接把最近那段工作接回来。",
+          "when": "你昨天做到一半，今天只想原地续做，而且最近一次 session 就是你要的那段时最适合用。它比先开选择器再挑对话更快，也适合你明确知道“我要接的就是上一段”的情况。",
+          "how": "在 terminal 里直接运行 `claude --continue`。如果你是在脚本或非交互流程里，官方文档也给了 `claude --continue --print \"Continue with my task\"` 这种写法，让它以非交互方式接回最近对话。",
+          "note": "**优点**：快，没有选择器。**限制**：它只接最近一次；如果你最近还开过别的任务，continue 可能会把你带回错的上下文，这时就该换成 resume。",
+          "scenario": "你昨晚做到一半就离开，今天回来只想把同一个 refactor 收完，而且中间没再开别的任务。直接跑 `claude --continue`，会比先看对话列表再选一次更省步骤。"
+        },
+        "en": {
+          "title": "Jump straight back into the latest conversation",
+          "what": "This CLI command automatically resumes your most recent Claude Code conversation. Anthropic documents it separately from resume: continue does not ask which thread you want. It simply reconnects you to the latest one.",
+          "when": "Use it when you left a task half-finished and know that the most recent session is exactly the one you want. It is faster than opening a picker first, and it fits the simple case where recency is enough.",
+          "how": "Run `claude --continue` in your terminal. For scripts or non-interactive use, Anthropic also shows `claude --continue --print \"Continue with my task\"`, which resumes the latest conversation without entering the full interactive flow.",
+          "note": "**Strength**: it is fast and skips the picker. **Limitation**: it only targets the most recent conversation. If you touched another task afterward, continue may land in the wrong thread and resume becomes the safer choice.",
+          "scenario": "You stopped in the middle of a refactor last night and want to finish that exact task this morning. If you did not start anything else in between, `claude --continue` is the shortest path back into that work."
+        },
+        "ja": {
+          "title": "いちばん最近の会話へすぐ戻る",
+          "what": "この CLI コマンドは、直近の Claude Code 会話を自動で再開します。公式では resume と分けて説明されていて、continue はどの会話に戻るかを聞かず、いちばん最近のものへそのまま接続します。",
+          "when": "昨日の作業を途中で止めていて、戻りたいのがまさにその直近 session だと分かっているときに向いています。先に一覧を開いて選ぶより速く、単純に『前回の続き』で十分な場面に合います。",
+          "how": "terminal で `claude --continue` を実行します。スクリプトや非対話フローでは、公式が `claude --continue --print \"Continue with my task\"` も示していて、最新会話を非対話で再開できます。",
+          "note": "**強み**：速く、選択画面がいらないこと。**制約**：対象は直近の会話だけ。もしそのあと別タスクを触っていたなら、continue では違う文脈に戻る可能性があるので resume の方が安全です。",
+          "scenario": "昨夜、refactor を途中で止めて終わり、今朝はその続きをやるだけだとします。その間に別の会話を始めていないなら、`claude --continue` がいちばん手数の少ない戻り方です。"
+        },
+        "ko": {
+          "title": "가장 최근 대화로 바로 돌아가기",
+          "what": "이 CLI 명령은 가장 최근의 Claude Code 대화를 자동으로 다시 엽니다. 공식 문서에서도 resume 와 분리해 설명하는데, continue 는 어느 대화를 고를지 묻지 않고 가장 최신 thread 로 바로 이어 줍니다.",
+          "when": "어제 하다 만 작업이 있고, 지금 돌아가야 할 대상이 바로 그 최근 session 이라는 걸 확실히 알 때 쓰면 좋습니다. 목록을 먼저 열어 고르는 것보다 빠르고, 단순히 ‘지난번 이어서’면 충분한 경우에 잘 맞습니다.",
+          "how": "터미널에서 `claude --continue` 를 실행하세요. 스크립트나 비대화형 흐름이라면 공식 문서에 나온 `claude --continue --print \"Continue with my task\"` 같은 방식도 쓸 수 있어, 최신 대화를 비대화형으로 이어갈 수 있습니다.",
+          "note": "**장점**: 빠르고 선택기가 없습니다. **제한**: 가장 최근 대화만 대상으로 삼습니다. 그 뒤에 다른 작업을 건드렸다면 엉뚱한 thread 로 갈 수 있으니, 그런 경우에는 resume 가 더 안전합니다.",
+          "scenario": "어젯밤 refactor 를 하다 중간에 멈췄고, 오늘 아침 그 작업만 이어서 끝내면 되는 상황을 떠올려 보세요. 사이에 다른 대화를 시작하지 않았다면 `claude --continue` 가 가장 짧은 복귀 경로입니다."
+        }
+      }
+    },
+    {
+      "id": "cost",
+      "command": "/cost",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "查看這段 session 的 token 用量",
+          "what": "顯示目前這段 Claude Code session 的 token 使用統計。官方文件提到它會列出像成本、API 持續時間、整體牆鐘時間，以及這段 session 內的 code 變更量。",
+          "when": "你在 API 計費模式下工作、想知道這段互動目前花了多少時很有用。官方也特別註明，/cost 不是替 Max 或 Pro 訂閱設計的重點指令，所以要看你的使用方案。",
+          "how": "直接在對話裡輸入 /cost。Claude 會回一份目前 session 的統計摘要，讓你決定要不要先停、先 compact、拆小任務，或換一種更省的工作方式。",
+          "note": "**看到的是**：目前這一段 session 的使用情況。**不要把它當成**：整個團隊、所有歷史、或每月帳單的完整總表；那些要去對應的成本頁或後台看。",
+          "scenario": "你已經連續做了 45 分鐘 refactor，還開了好幾輪搜尋與修改。這時打 /cost，看見這段 session 已經很重，就能決定先 /compact，還是把剩下的工作切到下一段對話再做。"
+        },
+        "zh-CN": {
+          "title": "查看这段 session 的 token 用量",
+          "what": "显示当前这段 Claude Code session 的 token 使用统计。官方文档提到它会列出像成本、API 持续时间、整体墙钟时间，以及这段 session 里的代码变更量。",
+          "when": "你在 API 计费模式下工作、想知道这段互动目前花了多少时很有用。官方也特别注明，/cost 不是替 Max 或 Pro 订阅设计的重点命令，所以要看你的使用方案。",
+          "how": "直接在对话里输入 /cost。Claude 会返回一份当前 session 的统计摘要，让你决定要不要先停、先 compact、拆小任务，或者换一种更省的工作方式。",
+          "note": "**看到的是**：当前这一段 session 的使用情况。**不要把它当成**：整个团队、所有历史、或每月账单的完整总表；那些要去对应的成本页或后台看。",
+          "scenario": "你已经连续做了 45 分钟 refactor，还开了好几轮搜索和修改。这时打 /cost，看见这段 session 已经很重，就能决定先 /compact，还是把剩下的工作切到下一段对话再做。"
+        },
+        "en": {
+          "title": "Check token usage for this session",
+          "what": "This shows usage statistics for your current Claude Code session. Anthropic’s cost guide says the output can include things like total cost, API duration, wall-clock duration, and the amount of code changed in that session.",
+          "when": "It is useful when you are on API-based billing and want to see how expensive the current interaction has become. Anthropic also notes that /cost is not mainly intended for Max or Pro subscribers, so the relevance depends on your plan.",
+          "how": "Type /cost in the chat. Claude will return a summary for the current session, which helps you decide whether to stop here, compact first, split the task up, or keep going with the current approach.",
+          "note": "**What it shows**: usage for the current session. **What it is not**: a full team dashboard, complete historical reporting, or your monthly bill; those belong in the broader cost tooling or account views.",
+          "scenario": "You have been refactoring for 45 minutes and already triggered several rounds of searching and edits. Run /cost, notice the session is getting heavy, and then decide whether to /compact first or move the remaining work into a fresh conversation."
+        },
+        "ja": {
+          "title": "この session の token 使用量を見る",
+          "what": "いまの Claude Code session の使用統計を表示するコマンドです。公式のコストガイドでは、コスト、API の実行時間、経過時間、そしてその session でどれだけコードを変更したかなどが出ると説明されています。",
+          "when": "API 課金で使っていて、このやり取りがどのくらい重くなっているか確認したいときに役立ちます。公式には /cost は Max や Pro 契約向けの主役コマンドではないとも書かれているので、自分のプランに合わせて使い分けます。",
+          "how": "会話欄で /cost と入力します。Claude が現在の session の要約を返すので、ここで止めるか、先に compact するか、タスクを分けるか、そのまま続けるかを判断できます。",
+          "note": "**見えているもの**：現在の session の使用状況。**見えていないもの**：チーム全体、すべての履歴、月次請求の完全な一覧。そこは別のコスト画面や管理画面で見る前提です。",
+          "scenario": "45 分ほど refactor を続けていて、検索と編集を何度も回している場面を考えてください。ここで /cost を見て session が重いとわかれば、先に /compact するか、残りを新しい会話へ切り出すかを決めやすくなります。"
+        },
+        "ko": {
+          "title": "이 session 의 token 사용량 보기",
+          "what": "현재 Claude Code session 의 사용 통계를 보여 줍니다. 공식 비용 가이드에 따르면 총비용, API 지속 시간, 전체 경과 시간, 그리고 그 session 에서 변경한 코드 양 같은 항목이 표시될 수 있습니다.",
+          "when": "API 기반 과금으로 쓰고 있고, 지금 상호작용이 얼마나 무거워졌는지 확인하고 싶을 때 유용합니다. 공식 문서에는 /cost 가 Max 나 Pro 구독자를 위한 핵심 명령은 아니라고도 적혀 있으니, 자신의 플랜에 맞춰 해석하면 됩니다.",
+          "how": "대화창에 /cost 를 입력하세요. Claude가 현재 session 요약을 돌려주고, 그 정보를 보고 여기서 멈출지, 먼저 compact 할지, 작업을 더 잘게 나눌지 판단할 수 있습니다.",
+          "note": "**보이는 것**: 현재 session 의 사용 현황. **아닌 것**: 팀 전체 대시보드, 전체 이력 보고서, 월 청구서의 완전한 집계. 그런 것은 별도의 비용 화면이나 계정 관리에서 봐야 합니다.",
+          "scenario": "45분째 refactor 를 하고 있고, 검색과 수정도 여러 차례 돌린 상황이라고 해 봅시다. 이때 /cost 를 보고 session 이 꽤 무겁다는 걸 확인하면, 먼저 /compact 를 할지 아니면 남은 작업을 새 대화로 넘길지 결정하기 쉬워집니다."
+        }
+      }
+    },
+    {
+      "id": "model",
+      "command": "/model",
+      "level": "intermediate",
+      "translations": {
+        "zh-TW": {
+          "title": "切換目前要用的 Claude 模型",
+          "what": "這個指令用來選擇或切換 AI model。官方 slash commands 文件只給了很直接的定義，但它的意義很實際：你可以依當前任務改變模型，而不是整段工作都用同一種配置硬做到底。",
+          "when": "當你在速度、能力、成本或回應風格之間想換平衡點時就該用。像是先用一個較快的模型探索，再在較需要品質判斷的段落改用另一個模型，這種切換就有意義。",
+          "how": "在對話裡輸入 /model，然後選擇你要的模型。換完之後繼續同一段工作即可，不需要重建 repo 或重新安裝 Claude Code；改的是眼前這段互動要交給哪個模型處理。",
+          "note": "**它改的是**：目前互動所用的模型選擇。**它不會自動改的**：你的 repo 狀態、CLAUDE.md 規則、或先前已經落到磁碟的程式碼結果。",
+          "scenario": "你先花一段時間做廣泛探索與查檔，後面準備進入比較細的重構與判斷。這時用 /model 切到更適合當前階段的模型，比整場都鎖死在同一種模式更靈活。"
+        },
+        "zh-CN": {
+          "title": "切换当前要用的 Claude 模型",
+          "what": "这个命令用来选择或切换 AI model。官方 slash commands 文档只给了非常直接的定义，但它的意义很实际：你可以根据当前任务调整模型，而不是整段工作都硬用同一种配置做到底。",
+          "when": "当你想在速度、能力、成本或响应风格之间换一个平衡点时就该用。比如先用一个更快的模型做探索，再在更需要质量判断的阶段切到另一个模型，这种切换就很有意义。",
+          "how": "在对话里输入 /model，然后选择你要的模型。切换后继续当前工作即可，不需要重建 repo 或重新安装 Claude Code；变的是这段互动交给哪个模型处理。",
+          "note": "**它改变的是**：当前互动使用的模型选择。**它不会自动改变的**：你的 repo 状态、CLAUDE.md 规则，或者之前已经落到磁盘上的代码结果。",
+          "scenario": "你先花一段时间做广泛探索和读文件，后面准备进入更细的重构与判断。这时用 /model 切到更适合当前阶段的模型，会比整场都锁死在同一种模式里更灵活。"
+        },
+        "en": {
+          "title": "Switch the Claude model for the current work",
+          "what": "This command lets you select or change the AI model. The official slash-command reference states that simply, but the practical value is that you can adapt the model to the task instead of forcing every phase of work through the same setup.",
+          "when": "Use it when you want a different balance of speed, capability, cost, or response style. For example, you might explore with one model first and then switch when the work becomes more judgment-heavy or detail-sensitive.",
+          "how": "Type /model in the chat and choose the model you want. Then continue the task. You do not need to rebuild the repo or reinstall Claude Code; you are only changing which model handles the current interaction.",
+          "note": "**What changes**: the model selection for the current interaction. **What does not automatically change**: your repo state, the rules in CLAUDE.md, or code that has already been written to disk.",
+          "scenario": "You spend the first stretch of work scanning files and exploring options, and then you move into a tighter refactor that needs stronger judgment. Switching with /model at that transition can be more effective than staying in one mode for the entire session."
+        },
+        "ja": {
+          "title": "いま使う Claude の model を切り替える",
+          "what": "AI model を選択または切り替えるためのコマンドです。公式の slash command 一覧では短く説明されていますが、実際には作業内容に合わせて model を変えられる点が重要で、すべての工程を同じ設定で押し切る必要がなくなります。",
+          "when": "速度、能力、コスト、応答の傾向のバランスを変えたいときに使います。たとえば最初は速めの model で探索し、その後、判断や細部が重くなる段階で別の model に切り替える、といった使い分けです。",
+          "how": "会話欄で /model と入力し、使いたい model を選びます。切り替えたらそのまま作業を続ければよく、repo の作り直しや Claude Code の再インストールは不要です。変わるのは現在のやり取りを処理する model です。",
+          "note": "**変わるもの**：現在のやり取りで使う model。**自動では変わらないもの**：repo の状態、CLAUDE.md のルール、すでにディスクへ書かれたコード。",
+          "scenario": "最初はファイル探索と選択肢出しを広めに行い、そのあとで細かい refactor と判断に入る場面を考えてください。そこで /model を切り替えると、最初から最後まで同じ mode で押し通すより扱いやすいことがあります。"
+        },
+        "ko": {
+          "title": "현재 작업에 쓸 Claude 모델 바꾸기",
+          "what": "AI model 을 선택하거나 바꾸는 명령입니다. 공식 slash commands 문서의 설명은 짧지만 실무적으로는 꽤 중요합니다. 작업 단계에 맞춰 모델을 바꾸면, 모든 일을 같은 설정으로 끝까지 밀어붙일 필요가 없어집니다.",
+          "when": "속도, 성능, 비용, 응답 스타일의 균형을 바꾸고 싶을 때 쓰세요. 예를 들어 초반 탐색은 더 빠른 모델로 하고, 이후 판단과 세부 검토가 더 중요한 구간에서 다른 모델로 전환하는 식입니다.",
+          "how": "대화창에 /model 을 입력하고 원하는 모델을 고르세요. 그런 다음 같은 작업을 계속하면 됩니다. repo 를 다시 만들거나 Claude Code 를 재설치할 필요는 없고, 현재 상호작용을 어떤 모델이 처리할지만 바뀝니다.",
+          "note": "**바뀌는 것**: 현재 상호작용에 쓰는 모델 선택. **자동으로 안 바뀌는 것**: repo 상태, CLAUDE.md 규칙, 이미 디스크에 써 놓은 코드 결과물.",
+          "scenario": "처음에는 파일을 훑고 선택지를 넓게 살펴보다가, 이후에는 더 세밀한 refactor 와 판단 단계로 들어간다고 해 봅시다. 그 전환 지점에서 /model 을 바꾸면, 처음부터 끝까지 같은 mode 로 가는 것보다 더 잘 맞을 수 있습니다."
+        }
+      }
+    },
+    {
+      "id": "init",
+      "command": "/init",
+      "level": "beginner",
+      "translations": {
+        "zh-TW": {
+          "title": "替專案建立 CLAUDE.md 起手式",
+          "what": "這個指令會幫你的專案初始化一份 CLAUDE.md 指南。官方把它當成建立 project memory 的入口，用來記錄這個 codebase 常用的 build、test、lint、命名風格與架構習慣。",
+          "when": "新 repo 剛開始導入 Claude Code、團隊想把共用規則落成檔案、或你已經重複解釋同一批專案背景很多次時，應該優先用。它不是解決單一 bug，而是先把工作地板鋪好。",
+          "how": "在專案根目錄的對話中輸入 /init。Claude 會幫你起一份 CLAUDE.md 草稿，你再補上真正重要的內容，例如常跑的指令、程式風格、專案結構、不能踩的規則。",
+          "note": "**建議寫進去**：build/test/lint 指令、命名慣例、架構重點、常見工作流。**不要塞太多**：一次性 ticket 細節或今天才有用、明天就失效的暫時指示。",
+          "scenario": "你每次開新對話都要重新說明『測試用 uv run pytest、格式檢查用 ruff、這個 repo 不接受直接改 generated 檔』。先跑 /init 把這些規則寫進 CLAUDE.md，以後 Claude 一進 repo 就先看到它。"
+        },
+        "zh-CN": {
+          "title": "为项目建立 CLAUDE.md 起手式",
+          "what": "这个命令会帮你的项目初始化一份 CLAUDE.md 指南。官方把它当成建立 project memory 的入口，用来记录这个 codebase 常用的 build、test、lint、命名风格与架构习惯。",
+          "when": "新 repo 刚开始接入 Claude Code、团队想把共享规则落成文件、或者你已经重复解释同一批项目背景很多次时，应该优先用。它不是解决单个 bug，而是先把工作地板铺好。",
+          "how": "在项目根目录的对话里输入 /init。Claude 会先帮你起一份 CLAUDE.md 草稿，你再补上真正重要的内容，比如常跑的命令、代码风格、项目结构、不能踩的规则。",
+          "note": "**建议写进去**：build/test/lint 命令、命名惯例、架构重点、常见工作流。**不要塞太多**：一次性 ticket 细节，或者今天有用明天就失效的临时指示。",
+          "scenario": "你每次开新对话都得重新说明“测试用 uv run pytest、格式检查用 ruff、这个 repo 不接受直接改 generated 文件”。先跑 /init 把这些规则写进 CLAUDE.md，以后 Claude 一进 repo 就先看到它。"
+        },
+        "en": {
+          "title": "Bootstrap a CLAUDE.md for the project",
+          "what": "This command initializes a CLAUDE.md guide for your project. Anthropic presents it as the starting point for project memory, so you can record the build, test, lint, naming, and architecture conventions that matter in this codebase.",
+          "when": "Use it when a repo is just starting with Claude Code, when a team wants shared rules written down, or when you keep repeating the same project context in every new chat. It is not for fixing one bug; it is for setting the floor.",
+          "how": "Run /init from a chat in the project root. Claude will draft a starter CLAUDE.md, and then you refine it with the details that actually matter here, such as recurring commands, code style rules, project structure, and no-go areas.",
+          "note": "**Good things to include**: build, test, and lint commands; naming conventions; architectural patterns; common workflows. **Do not overload it with**: one-off ticket details or temporary instructions that will be stale tomorrow.",
+          "scenario": "Every new conversation starts with you explaining that tests run with `uv run pytest`, linting uses `ruff`, and generated files should not be edited directly. Run /init once, capture that in CLAUDE.md, and Claude sees it as soon as it enters the repo."
+        },
+        "ja": {
+          "title": "プロジェクト用の CLAUDE.md を作り始める",
+          "what": "このコマンドは、プロジェクト向けの CLAUDE.md ガイドを初期化します。公式では project memory の入口として案内されていて、この codebase で大事な build、test、lint、命名規則、アーキテクチャの前提を書き残すために使います。",
+          "when": "新しい repo で Claude Code を使い始めるとき、チーム共通ルールをファイルに落としたいとき、あるいは毎回同じプロジェクト説明を繰り返しているときに向いています。単発の bug 修正より、まず土台を整えるためのコマンドです。",
+          "how": "プロジェクトのルートで /init と入力します。Claude が CLAUDE.md のたたき台を作るので、そこに頻出コマンド、コーディング規約、構成上の注意、触ってはいけない領域などを追記して仕上げます。",
+          "note": "**入れておきたいもの**：build/test/lint コマンド、命名ルール、アーキテクチャの要点、よくある作業手順。**入れすぎない方がいいもの**：単発 ticket の事情や、今日しか有効でない一時指示。",
+          "scenario": "新しい会話を始めるたびに「test は `uv run pytest`、lint は `ruff`、generated ファイルは直接編集しない」と説明しているなら、/init でそれを CLAUDE.md にまとめてしまうのが早いです。以後、Claude は repo に入った時点でその前提を読めます。"
+        },
+        "ko": {
+          "title": "프로젝트용 CLAUDE.md 시작하기",
+          "what": "이 명령은 프로젝트용 CLAUDE.md 가이드를 초기화합니다. 공식 문서에서는 project memory 의 시작점으로 소개하며, 이 codebase 에서 중요한 build, test, lint, 네이밍, 아키텍처 규칙을 적어 두는 용도입니다.",
+          "when": "새 repo 에 Claude Code 를 막 도입할 때, 팀 공통 규칙을 파일로 남기고 싶을 때, 또는 새 대화마다 같은 프로젝트 배경을 반복 설명하고 있을 때 유용합니다. 단일 bug 를 고치는 명령이라기보다 작업 바닥을 먼저 까는 명령입니다.",
+          "how": "프로젝트 루트에서 대화 중 /init 를 입력하세요. Claude가 CLAUDE.md 초안을 만들어 주고, 거기에 자주 쓰는 명령, 코드 스타일, 프로젝트 구조, 건드리면 안 되는 영역 같은 핵심 정보를 채워 넣으면 됩니다.",
+          "note": "**넣기 좋은 것**: build/test/lint 명령, 네이밍 규칙, 아키텍처 패턴, 자주 쓰는 작업 흐름. **너무 넣지 말 것**: 일회성 ticket 세부사항이나 내일이면 낡을 임시 지시.",
+          "scenario": "새 대화를 열 때마다 “test 는 `uv run pytest`, lint 는 `ruff`, generated 파일은 직접 수정하지 말 것”을 다시 설명하고 있다면, /init 로 그 내용을 CLAUDE.md 에 적어 두는 편이 훨씬 낫습니다. 이후 Claude는 repo 에 들어오자마자 그 전제를 읽게 됩니다."
+        }
+      }
+    },
+    {
+      "id": "file-mention",
+      "command": "@file",
+      "level": "intermediate",
+      "translations": {
+        "zh-TW": {
+          "title": "在 prompt 裡直接帶入檔案內容",
+          "what": "這不是 slash command，而是 Claude Code 的 `@` 檔案引用語法。官方工作流文件說，你可以在訊息裡用 `@path/to/file` 快速把檔案帶進對話，不用先等 Claude 自己去找或讀。",
+          "when": "你希望 Claude 立刻看某個檔案、比較兩個版本、或把問題鎖在少數幾個檔案時特別好用。比起只說『去找某個功能』，直接點名檔案通常能少一輪搜尋與誤解。",
+          "how": "在訊息裡直接寫像 `@src/utils/auth.js` 這樣的路徑即可。官方也提到路徑可以是相對或絕對；如果你引用的是目錄，Claude 看到的是檔案列表而不是整個目錄內容；同一則訊息也可以放多個 `@file`。",
+          "note": "**額外效果**：官方文件說，`@` 檔案引用還會把該檔所在目錄與上層目錄裡的 CLAUDE.md 一起帶進 context。**要注意**：引用目錄時只會給 listing，不會自動把所有檔案全文塞進來。",
+          "scenario": "你想問『登入流程為什麼在這裡漏掉 null check？』與其讓 Claude 自己找，不如直接問：`Explain the logic in @src/auth/login.py and compare it with @src/auth/session.py`。這樣它一開始就看對檔案。"
+        },
+        "zh-CN": {
+          "title": "在 prompt 里直接带入文件内容",
+          "what": "这不是 slash command，而是 Claude Code 的 `@` 文件引用语法。官方工作流文档说，你可以在消息里用 `@path/to/file` 快速把文件带进对话，不用先等 Claude 自己去找或去读。",
+          "when": "当你希望 Claude 立刻看某个文件、比较两个版本，或者把问题范围锁在少数几个文件时特别有用。比起只说“去找某个功能”，直接点名文件通常能少一轮搜索和误解。",
+          "how": "在消息里直接写类似 `@src/utils/auth.js` 这样的路径即可。官方也提到路径可以是相对或绝对；如果你引用的是目录，Claude 看到的是文件列表而不是整个目录内容；同一条消息里也可以放多个 `@file`。",
+          "note": "**额外效果**：官方文档说，`@` 文件引用还会把该文件所在目录以及上层目录里的 CLAUDE.md 一起带进 context。**要注意**：引用目录时只会给 listing，不会自动把所有文件全文都塞进来。",
+          "scenario": "你想问“登录流程为什么在这里漏了 null check？”与其让 Claude 自己找，不如直接写：`Explain the logic in @src/auth/login.py and compare it with @src/auth/session.py`。这样它一开始就看对文件。"
+        },
+        "en": {
+          "title": "Pull file contents straight into the prompt",
+          "what": "This is not a slash command. It is Claude Code’s `@` file-reference syntax. Anthropic’s workflow guide says you can use `@path/to/file` in a message to bring a file into the conversation immediately instead of waiting for Claude to discover it on its own.",
+          "when": "Use it when you want Claude to look at a specific file right away, compare two versions, or keep the discussion scoped to a small set of files. Naming the files directly is usually faster and less ambiguous than asking Claude to search first.",
+          "how": "Write a path like `@src/utils/auth.js` directly in your message. Anthropic also notes that paths can be relative or absolute. If you reference a directory, Claude gets a listing rather than full contents, and you can mention multiple files in the same message.",
+          "note": "**Extra effect**: Anthropic says `@` file references also pull in the CLAUDE.md files from that file’s directory and its parent directories. **Caution**: directory references do not dump every file body; they only provide the listing.",
+          "scenario": "Suppose you want to ask why a login flow missed a null check. Instead of telling Claude to hunt around, say `Explain the logic in @src/auth/login.py and compare it with @src/auth/session.py`. That points Claude at the right files from the start."
+        },
+        "ja": {
+          "title": "prompt にファイル内容を直接持ち込む",
+          "what": "これは slash command ではなく、Claude Code の `@` ファイル参照構文です。公式ワークフローでは、`@path/to/file` をメッセージ内に書くことで、Claude が自分で探しに行くのを待たずに、そのファイルをすぐ会話へ取り込めると説明されています。",
+          "when": "特定ファイルをすぐ見せたいとき、2 つの版を比較したいとき、あるいは議論の対象を少数のファイルに絞りたいときに便利です。『その機能を探して』と頼むより、ファイル名を直接示す方が速くて誤解も減ります。",
+          "how": "メッセージ内に `@src/utils/auth.js` のようなパスを書きます。公式では、パスは相対でも絶対でもよいとされています。ディレクトリを参照した場合は全文ではなく一覧が渡り、1 つのメッセージで複数ファイルを並べることもできます。",
+          "note": "**追加で入るもの**：公式によれば、`@` でファイルを参照すると、そのファイルのあるディレクトリと親ディレクトリの CLAUDE.md も context に入ります。**注意点**：ディレクトリ参照は一覧だけで、配下の全ファイル本文が自動で入るわけではありません。",
+          "scenario": "ログイン処理でなぜ null check が抜けたのか聞きたいとします。その場合、Claude に探させるより `Explain the logic in @src/auth/login.py and compare it with @src/auth/session.py` と書く方が、最初から正しいファイルに向けられます。"
+        },
+        "ko": {
+          "title": "프롬프트에 파일 내용을 바로 끌어오기",
+          "what": "이것은 slash command 가 아니라 Claude Code 의 `@` 파일 참조 문법입니다. 공식 워크플로우 문서에 따르면 메시지 안에 `@path/to/file` 을 써서, Claude가 스스로 파일을 찾아 읽기를 기다리지 않고 해당 파일을 바로 대화로 끌어올 수 있습니다.",
+          "when": "Claude가 특정 파일을 즉시 보게 하고 싶을 때, 두 버전을 비교할 때, 또는 논의를 소수의 파일로 좁히고 싶을 때 특히 유용합니다. 그냥 기능을 찾아 달라고 하기보다 파일을 직접 찍는 편이 보통 더 빠르고 덜 애매합니다.",
+          "how": "메시지에 `@src/utils/auth.js` 같은 경로를 그대로 쓰면 됩니다. 공식 문서에는 경로가 상대 경로여도 절대 경로여도 된다고 나와 있습니다. 디렉터리를 참조하면 전체 본문이 아니라 목록이 전달되고, 한 메시지에 여러 `@file` 을 함께 넣을 수도 있습니다.",
+          "note": "**추가 효과**: 공식 문서에 따르면 `@` 파일 참조는 그 파일이 있는 디렉터리와 상위 디렉터리의 CLAUDE.md 도 함께 context 로 가져옵니다. **주의점**: 디렉터리 참조는 listing 만 주고, 모든 파일 본문을 자동으로 다 넣지는 않습니다.",
+          "scenario": "로그인 흐름에서 왜 null check 가 빠졌는지 묻고 싶다고 해 봅시다. Claude에게 주변을 찾으라고 하기보다 `Explain the logic in @src/auth/login.py and compare it with @src/auth/session.py` 라고 쓰는 편이, 처음부터 올바른 파일을 보게 만듭니다."
+        }
+      }
+    }
+  ]
+}

@@ -172,7 +172,7 @@ def _dedup_key(entry: UsageEntry) -> str:
 def _as_int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
-    return max(0, value)
+    return max(0, int(value))
 
 
 def _as_str(value: Any) -> str:

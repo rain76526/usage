@@ -21,7 +21,7 @@ LITELLM_PRICING_URL = (
 CACHE_PATH = Path(os.path.expanduser("~/.claude/pricing_cache.json"))
 CACHE_TTL_DAYS = 7
 FALLBACK_RETRY_SECONDS = 600
-USER_AGENT = "usage/0.2"
+USER_AGENT = "usage/0.9"
 PROVIDER_PREFIXES = (
     "openai/",
     "anthropic/",
@@ -109,6 +109,8 @@ def _read_cache() -> PricingTable | None:
         try:
             return _normalize_pricing(json.load(file))
         except json.JSONDecodeError:
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("failed to decode pricing cache %s", CACHE_PATH, exc_info=True)
             return None
     return None
 
@@ -119,6 +121,8 @@ def _fetch_pricing() -> PricingTable | None:
         with urllib.request.urlopen(request, timeout=10) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except (OSError, json.JSONDecodeError, TimeoutError):
+        if os.environ.get("USAGE_DEBUG") == "1":
+            logger.warning("failed to fetch pricing from %s", LITELLM_PRICING_URL, exc_info=True)
         return None
     return _normalize_pricing(payload)
 
@@ -201,16 +205,16 @@ def _normalize_model_name(model: str) -> str:
 def _fallback_pricing() -> PricingTable:
     return {
         "claude-opus-4-6": {
-            "input_cost_per_token": 15e-6,
-            "output_cost_per_token": 75e-6,
-            "cache_creation_input_token_cost": 18.75e-6,
-            "cache_read_input_token_cost": 1.5e-6,
+            "input_cost_per_token": 5e-6,
+            "output_cost_per_token": 25e-6,
+            "cache_creation_input_token_cost": 6.25e-6,
+            "cache_read_input_token_cost": 0.5e-6,
         },
         "claude-opus-4-7": {
-            "input_cost_per_token": 15e-6,
-            "output_cost_per_token": 75e-6,
-            "cache_creation_input_token_cost": 18.75e-6,
-            "cache_read_input_token_cost": 1.5e-6,
+            "input_cost_per_token": 5e-6,
+            "output_cost_per_token": 25e-6,
+            "cache_creation_input_token_cost": 6.25e-6,
+            "cache_read_input_token_cost": 0.5e-6,
         },
         "claude-sonnet-4-6": {
             "input_cost_per_token": 3e-6,

@@ -224,7 +224,7 @@ def _as_dict(value: Any) -> dict[str, Any]:
 def _as_int(value: Any) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         return 0
-    return max(0, value)
+    return max(0, int(value))
 
 
 def _as_str(value: Any) -> str:

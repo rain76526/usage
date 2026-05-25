@@ -1,12 +1,12 @@
-"""把 usage 的 statusLine hook 安裝到 / 從 Claude Code 設定移除。
+"""Install or remove usage's statusLine hook for Claude Code.
 
-Claude Code 透過 ~/.claude/settings.json 的 statusLine 欄位，
-在每次刷新狀態列時呼叫指定指令並餵 JSON 給 stdin。
-我們把專案內的 usage_statusline.py 複製到 ~/.claude/usage-statusline.py，
-然後把 statusLine 指向它，讓它把 JSON 落地到磁碟給 usage 主程式讀。
+Claude Code calls the command configured in ~/.claude/settings.json statusLine
+and sends session JSON on stdin whenever it refreshes the status line. The
+installer copies usage_statusline.py to ~/.claude/usage-statusline.py and points
+statusLine at it, so the main app can read a local status file.
 
-備份原 statusLine 到 settings["usage"]["previousStatusLine"]，
-unsetup 時還原。
+The previous statusLine is backed up under settings["usage"]["previousStatusLine"]
+and restored by unsetup.
 """
 
 from __future__ import annotations
@@ -14,23 +14,46 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import re
 import shlex
 import shutil
 import stat
 import sys
 import tempfile
+import tomllib
 from pathlib import Path
 from typing import Any
 
+from i18n import t as _t
+
 CLAUDE_SETTINGS = Path(os.path.expanduser("~/.claude/settings.json"))
 HOOK_TARGET = Path(os.path.expanduser("~/.claude/usage-statusline.py"))
+FORWARDER_TARGET = Path(os.path.expanduser("~/.claude/usage-statusline-forwarder.py"))
 STATUS_FILE = Path(os.path.expanduser("~/.claude/usage-status.json"))
+CODEX_CONFIG = Path(os.path.expanduser("~/.codex/config.toml"))
+CODEX_BACKUP = Path(os.path.expanduser("~/.codex/usage-backup.json"))
+# LEGACY_TT_* / tokenTracker / tt-* below are MIGRATION-ONLY constants for users
+# upgrading from the third-party tool stormzhang/token-tracker. They are NOT links
+# to any in-repo module or external directory. Do not investigate or "go look" for
+# a token-tracker source. It does not exist in this repository or on this machine.
+LEGACY_CODEX_BACKUP = Path(os.path.expanduser("~/.codex/tt-backup.json"))
+CODEX_STATUS_LINE = [
+    "project",
+    "five-hour-limit",
+    "weekly-limit",
+    "context-remaining",
+    "model-with-reasoning",
+]
 LEGACY_NAME = "usag"
 LEGACY_HOOK_TARGET = Path(os.path.expanduser(f"~/.claude/{LEGACY_NAME}-statusline.py"))
 LEGACY_STATUS_FILE = Path(os.path.expanduser(f"~/.claude/{LEGACY_NAME}-status.json"))
+LEGACY_TT_HOOK_TARGET = Path(os.path.expanduser("~/.claude/tt-statusline.py"))
 BACKUP_KEY = "usage"
+LEGACY_TT_BACKUP_KEY = "tokenTracker"
 LEGACY_BACKUP_KEY = LEGACY_NAME
 PREV_SL_KEY = "previousStatusLine"
+HOOK_VERSION = "1.0"
+_SL_REGEX = re.compile(r"status_line\s*=\s*\[.*?\]", re.DOTALL)
 
 
 def _resolve_hook_source() -> Path:
@@ -42,7 +65,23 @@ def _resolve_hook_source() -> Path:
         if path.exists():
             return path
     tried = ", ".join(str(path) for path in paths)
-    raise SystemExit(f"❌ 找不到 hook 原始檔，tried: {tried}")
+    raise SystemExit(_t("setup_hook_source_missing", tried=tried))
+
+
+def _resolve_forwarder_source() -> Path:
+    paths = [
+        Path(__file__).resolve().parent / "usage_statusline_forwarder.py",
+        (
+            Path(sys.executable).resolve().parent.parent
+            / "Resources"
+            / "usage_statusline_forwarder.py"
+        ),
+    ]
+    for path in paths:
+        if path.exists():
+            return path
+    tried = ", ".join(str(path) for path in paths)
+    raise SystemExit(_t("setup_forwarder_source_missing", tried=tried))
 
 
 def _statusline_command() -> str:
@@ -63,11 +102,55 @@ def _statusline_command() -> str:
     return f"{shlex.quote(python)} {shlex.quote(str(HOOK_TARGET))}"
 
 
+def _shell_arg(value: str) -> str:
+    return shlex.quote(value)
+
+
+def _forwarder_command() -> str:
+    python = (
+        shutil.which("python3")
+        or shutil.which("python")
+        or ("python3" if sys.platform != "win32" else "python")
+    )
+    if sys.platform == "win32":
+        def _win_quote(s: str) -> str:
+            s = s.replace("\\", "/")
+            return f'"{s}"' if " " in s else s
+
+        return f"{_win_quote(python)} {_win_quote(str(FORWARDER_TARGET))}"
+    return f"{shlex.quote(python)} {shlex.quote(str(FORWARDER_TARGET))}"
+
+
 def _is_usage_hook(sl: object) -> bool:
     if not isinstance(sl, dict):
         return False
     cmd = sl.get("command")
     return isinstance(cmd, str) and "usage-statusline" in cmd
+
+
+def _is_legacy_tt_hook(sl: object) -> bool:
+    if not isinstance(sl, dict):
+        return False
+    cmd = sl.get("command")
+    return isinstance(cmd, str) and "tt-statusline" in cmd
+
+
+def _detect_current_state(settings: dict[str, Any] | None = None) -> str:
+    """Return 'none' | 'us-direct' | 'us-forwarder' | 'external'."""
+    data = _load_settings() if settings is None else settings
+    sl = data.get("statusLine")
+    if not isinstance(sl, dict):
+        return "none"
+    cmd = sl.get("command")
+    if not isinstance(cmd, str) or not cmd.strip():
+        return "none"
+    if "usage-statusline-forwarder" in cmd:
+        return "us-forwarder"
+    if "usage-statusline" in cmd:
+        return "us-direct"
+    if "tt-statusline" in cmd:
+        return "legacy-tt"
+    return "external"
 
 
 def _migrate_from_legacy_usage() -> None:
@@ -79,7 +162,7 @@ def _migrate_from_legacy_usage() -> None:
                 path.unlink()
                 changed = True
         except OSError as exc:
-            print(f"⚠ 無法移除舊檔 {path}: {exc}")
+            print(_t("setup_legacy_file_remove_failed", path=path, error=exc))
 
     settings: dict[str, Any] | None = None
     try:
@@ -89,9 +172,9 @@ def _migrate_from_legacy_usage() -> None:
             if isinstance(data, dict):
                 settings = data
             else:
-                print(f"⚠ {CLAUDE_SETTINGS} 不是 JSON object，略過 migration")
+                print(_t("setup_legacy_settings_not_object", path=CLAUDE_SETTINGS))
     except (OSError, json.JSONDecodeError) as exc:
-        print(f"⚠ 無法讀取舊設定做 migration: {exc}")
+        print(_t("setup_legacy_settings_read_failed", error=exc))
 
     if settings is not None:
         try:
@@ -105,32 +188,36 @@ def _migrate_from_legacy_usage() -> None:
                 settings.pop("statusLine", None)
                 changed = True
         except Exception as exc:
-            print(f"⚠ 無法清理舊 statusLine: {exc}")
+            print(_t("setup_legacy_statusline_cleanup_failed", error=exc))
 
         try:
             legacy_backup = settings.pop(LEGACY_BACKUP_KEY, None)
+            legacy_tt_backup = settings.pop(LEGACY_TT_BACKUP_KEY, None)
             current_backup = settings.get(BACKUP_KEY)
+            merged: dict[str, Any] = {}
             if isinstance(legacy_backup, dict):
+                merged.update(legacy_backup)
+            if isinstance(legacy_tt_backup, dict):
+                merged.update(legacy_tt_backup)
+            if isinstance(merged, dict) and merged:
                 if isinstance(current_backup, dict):
-                    settings[BACKUP_KEY] = {**legacy_backup, **current_backup}
+                    settings[BACKUP_KEY] = {**merged, **current_backup}
                 else:
-                    settings[BACKUP_KEY] = legacy_backup
+                    settings[BACKUP_KEY] = merged
                 changed = True
-            elif legacy_backup is not None:
+            elif legacy_backup is not None or legacy_tt_backup is not None:
                 changed = True
         except Exception as exc:
-            print(f"⚠ 無法搬移舊備份 key: {exc}")
+            print(_t("setup_legacy_backup_migrate_failed", error=exc))
 
         if changed:
             try:
                 _save_settings(settings)
             except Exception as exc:
-                print(f"⚠ 無法寫回 migration 設定: {exc}")
+                print(_t("setup_legacy_settings_write_failed", error=exc))
 
     if changed:
-        print(f"ℹ 已從 v0.1.x ({LEGACY_NAME}) 自動 migrate 到 usage")
-    else:
-        print("ℹ 無需 migration")
+        print(_t("setup_legacy_migrated", name=LEGACY_NAME))
 
 
 def _load_settings() -> dict[str, Any]:
@@ -140,9 +227,9 @@ def _load_settings() -> dict[str, Any]:
         with CLAUDE_SETTINGS.open(encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError) as exc:
-        raise SystemExit(f"❌ 無法讀取 {CLAUDE_SETTINGS}: {exc}") from exc
+        raise SystemExit(_t("setup_settings_read_failed", path=CLAUDE_SETTINGS, error=exc)) from exc
     if not isinstance(data, dict):
-        raise SystemExit(f"❌ {CLAUDE_SETTINGS} 必須是 JSON object")
+        raise SystemExit(_t("setup_settings_not_object", path=CLAUDE_SETTINGS))
     return data
 
 
@@ -169,62 +256,231 @@ def _copy_hook_script() -> None:
     HOOK_TARGET.chmod(HOOK_TARGET.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def setup() -> int:
-    _migrate_from_legacy_usage()
-    if not CLAUDE_SETTINGS.parent.exists():
-        print("❌ 找不到 ~/.claude/，請先安裝並執行過 Claude Code 一次", file=sys.stderr)
-        return 1
+def _copy_forwarder_script() -> None:
+    forwarder_source = _resolve_forwarder_source()
+    FORWARDER_TARGET.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(forwarder_source, FORWARDER_TARGET)
+    FORWARDER_TARGET.chmod(
+        FORWARDER_TARGET.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH
+    )
 
-    settings = _load_settings()
+
+def _backup_existing_statusline(settings: dict[str, Any]) -> None:
+    existing = settings.get("statusLine")
+    if not existing or _is_usage_hook(existing):
+        return
+    backup = settings.get(BACKUP_KEY)
+    if not isinstance(backup, dict):
+        backup = {}
+        settings[BACKUP_KEY] = backup
+    backup[PREV_SL_KEY] = existing
+    print(_t("setup_statusline_backed_up", backup_key=BACKUP_KEY, prev_key=PREV_SL_KEY))
+
+
+def _status_line_toml(items: list[str]) -> str:
+    body = ",\n".join(f'  "{item}"' for item in items)
+    return f"status_line = [\n{body},\n]"
+
+
+def _read_codex_config() -> tuple[str, dict[str, Any]] | None:
+    try:
+        content = CODEX_CONFIG.read_text(encoding="utf-8")
+        parsed = tomllib.loads(content)
+    except (OSError, tomllib.TOMLDecodeError):
+        return None
+    return content, parsed
+
+
+def _codex_status_line(parsed: dict[str, Any]) -> object:
+    tui = parsed.get("tui")
+    return tui.get("status_line") if isinstance(tui, dict) else None
+
+
+def _setup_codex() -> None:
+    result = _read_codex_config()
+    if not result:
+        return
+    content, parsed = result
+
+    old = _codex_status_line(parsed)
+    if old == CODEX_STATUS_LINE:
+        print(_t("setup_codex_already_configured"))
+        return
+
+    if old is not None:
+        CODEX_BACKUP.parent.mkdir(parents=True, exist_ok=True)
+        CODEX_BACKUP.write_text(
+            json.dumps({"status_line": old}, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        content = _SL_REGEX.sub(_status_line_toml(CODEX_STATUS_LINE), content)
+    elif "[tui]" in content:
+        content = content.replace("[tui]", f"[tui]\n{_status_line_toml(CODEX_STATUS_LINE)}")
+    else:
+        content += f"\n[tui]\n{_status_line_toml(CODEX_STATUS_LINE)}\n"
+
+    CODEX_CONFIG.write_text(content, encoding="utf-8")
+    print(_t("setup_codex_configured"))
+    if old is not None:
+        print(_t("setup_codex_backup_written", path=CODEX_BACKUP))
+    print(_t("setup_codex_restart_required"))
+
+
+def _unsetup_codex() -> None:
+    result = _read_codex_config()
+    if not result:
+        return
+    content, parsed = result
+
+    if _codex_status_line(parsed) is None:
+        return
+
+    backup_path = CODEX_BACKUP if CODEX_BACKUP.exists() else LEGACY_CODEX_BACKUP
+    if backup_path.exists():
+        try:
+            old_items = json.loads(backup_path.read_text(encoding="utf-8")).get("status_line", [])
+        except (OSError, json.JSONDecodeError, AttributeError):
+            old_items = []
+        content = _SL_REGEX.sub(_status_line_toml(old_items), content)
+        backup_path.unlink(missing_ok=True)
+        print(_t("setup_codex_restored"))
+    else:
+        content = re.sub(r"status_line\s*=\s*\[.*?\]\n?", "", content, flags=re.DOTALL)
+        print(_t("setup_codex_removed"))
+
+    CODEX_CONFIG.write_text(content, encoding="utf-8")
+
+
+def _installed_hook_version() -> str | None:
+    try:
+        with HOOK_TARGET.open(encoding="utf-8") as f:
+            for line in f:
+                if line.startswith("__version__"):
+                    return line.split("=", 1)[1].strip().strip("\"'")
+    except OSError:
+        pass
+    return None
+
+
+def needs_update() -> bool:
+    if not HOOK_TARGET.parent.exists():
+        return False
+    return _installed_hook_version() != HOOK_VERSION
+
+
+def update_hook() -> None:
+    if not HOOK_TARGET.parent.exists():
+        return
     _copy_hook_script()
 
-    existing = settings.get("statusLine")
-    if existing and not _is_usage_hook(existing):
-        backup = settings.get(BACKUP_KEY)
-        if not isinstance(backup, dict):
-            backup = {}
-            settings[BACKUP_KEY] = backup
-        backup[PREV_SL_KEY] = existing
-        print(f"ℹ 已備份原有 statusLine 到 settings.{BACKUP_KEY}.{PREV_SL_KEY}")
 
-    settings["statusLine"] = {"type": "command", "command": _statusline_command()}
+def is_setup() -> bool:
+    has_claude = CLAUDE_SETTINGS.parent.exists()
+    has_codex = CODEX_CONFIG.exists()
+    if not has_claude and not has_codex:
+        return False
+
+    if has_claude and _detect_current_state() not in {"us-direct", "us-forwarder"}:
+        return False
+
+    if has_codex:
+        result = _read_codex_config()
+        if not result:
+            return False
+        _, parsed = result
+        if _codex_status_line(parsed) != CODEX_STATUS_LINE:
+            return False
+
+    return True
+
+
+def _install_forwarder(settings: dict[str, Any]) -> None:
+    """Copy usage_statusline_forwarder.py to ~/.claude/ and update settings.json."""
+    _copy_hook_script()
+    _copy_forwarder_script()
+    _backup_existing_statusline(settings)
+    settings["statusLine"] = {"type": "command", "command": _forwarder_command()}
     _save_settings(settings)
 
-    print(f"✓ hook 已安裝：{HOOK_TARGET}")
-    print(f"✓ settings 已更新：{CLAUDE_SETTINGS}")
-    print("ℹ 請重新開啟 Claude Code 一次（讓它重新讀 settings 並刷新一次 statusLine）")
+
+def setup(force_forwarder: bool = False) -> int:
+    _migrate_from_legacy_usage()
+    has_claude = CLAUDE_SETTINGS.parent.exists()
+    has_codex = CODEX_CONFIG.exists()
+    if not has_claude and not has_codex:
+        print(_t("setup_no_agents"), file=sys.stderr)
+        return 1
+
+    if has_claude:
+        settings = _load_settings()
+        state = _detect_current_state(settings)
+
+        if force_forwarder or state in {"external", "legacy-tt"}:
+            _install_forwarder(settings)
+            print(_t("setup_forwarder_installed", path=FORWARDER_TARGET))
+            print(_t("setup_hook_installed", path=HOOK_TARGET))
+            print(_t("setup_settings_updated", path=CLAUDE_SETTINGS))
+            print(_t("setup_claude_restart_required"))
+        else:
+            _copy_hook_script()
+            if state == "none":
+                settings["statusLine"] = {"type": "command", "command": _statusline_command()}
+                _save_settings(settings)
+            elif state in {"us-direct", "us-forwarder"}:
+                print(_t("setup_statusline_already_usage"))
+
+            print(_t("setup_hook_installed", path=HOOK_TARGET))
+            print(_t("setup_settings_updated", path=CLAUDE_SETTINGS))
+            print(_t("setup_claude_restart_required"))
+
+    if has_codex:
+        _setup_codex()
+
     return 0
 
 
 def unsetup() -> int:
-    settings = _load_settings()
-    sl = settings.get("statusLine")
+    if CLAUDE_SETTINGS.parent.exists():
+        settings = _load_settings()
+        sl = settings.get("statusLine")
 
-    if _is_usage_hook(sl):
-        backup = settings.get(BACKUP_KEY)
-        prev = backup.get(PREV_SL_KEY) if isinstance(backup, dict) else None
-        if isinstance(prev, dict):
-            settings["statusLine"] = prev
-            print("✓ 已還原原有 statusLine")
+        if _is_usage_hook(sl) or _is_legacy_tt_hook(sl):
+            backup = settings.get(BACKUP_KEY)
+            legacy_backup = settings.get(LEGACY_TT_BACKUP_KEY)
+            prev = backup.get(PREV_SL_KEY) if isinstance(backup, dict) else None
+            if not isinstance(prev, dict) and isinstance(legacy_backup, dict):
+                prev = legacy_backup.get(PREV_SL_KEY)
+
+            if isinstance(prev, dict):
+                settings["statusLine"] = prev
+                print(_t("setup_claude_statusline_restored"))
+            else:
+                settings.pop("statusLine", None)
+                print(_t("setup_claude_statusline_removed"))
+
+            if isinstance(backup, dict):
+                backup.pop(PREV_SL_KEY, None)
+                if not backup:
+                    del settings[BACKUP_KEY]
+            if isinstance(legacy_backup, dict):
+                legacy_backup.pop(PREV_SL_KEY, None)
+                if not legacy_backup:
+                    del settings[LEGACY_TT_BACKUP_KEY]
+
+            _save_settings(settings)
         else:
-            settings.pop("statusLine", None)
-            print("✓ 已移除 usage statusLine")
+            print(_t("setup_statusline_not_usage"))
 
-        if isinstance(backup, dict):
-            backup.pop(PREV_SL_KEY, None)
-            if not backup:
-                del settings[BACKUP_KEY]
+        for path in (HOOK_TARGET, FORWARDER_TARGET, LEGACY_TT_HOOK_TARGET):
+            if path.exists():
+                path.unlink()
+                print(_t("setup_hook_deleted", path=path))
 
-        _save_settings(settings)
-    else:
-        print("ℹ statusLine 不是 usage 安裝的，settings 未動")
+        if STATUS_FILE.exists():
+            STATUS_FILE.unlink()
+            print(_t("setup_status_file_deleted", path=STATUS_FILE))
 
-    if HOOK_TARGET.exists():
-        HOOK_TARGET.unlink()
-        print(f"✓ 已刪除 hook：{HOOK_TARGET}")
-
-    if STATUS_FILE.exists():
-        STATUS_FILE.unlink()
-        print(f"✓ 已刪除狀態檔：{STATUS_FILE}")
+    if CODEX_CONFIG.exists():
+        _unsetup_codex()
 
     return 0

@@ -59,7 +59,7 @@ class UsageRateTracker:
         if self.forced_group is not None:
             return self.forced_group
 
-        raw_value = os.environ.get("USAG_FORCE_GROUP")
+        raw_value = os.environ.get("USAGE_FORCE_GROUP")
         if raw_value is None:
             return None
 

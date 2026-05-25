@@ -30,11 +30,11 @@ jobs:
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           ref: ${{ steps.ref.outputs.ref }}
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: '3.13'
 
@@ -82,6 +82,26 @@ jobs:
         run: |
           cd dist && zip -r usage.app.zip usage.app
 
+      - name: Generate SHA256
+        run: |
+          cd dist && shasum -a 256 usage.app.zip | tee usage.app.zip.sha256
+
+      - name: Extract release notes from CHANGELOG.en.md
+        id: notes
+        run: |
+          TAG="${{ steps.ref.outputs.tag }}"
+          VERSION="${TAG#v}"
+          NOTES_FILE="$(mktemp)"
+          awk -v v="$VERSION" '
+            $0 ~ "^## \\[" v "\\]" { flag=1; next }
+            /^## \[/ && flag { exit }
+            flag { print }
+          ' CHANGELOG.en.md > "$NOTES_FILE"
+          if [[ ! -s "$NOTES_FILE" ]]; then
+            echo "CHANGELOG.en.md has no section for [$VERSION]; using empty notes."
+          fi
+          echo "path=$NOTES_FILE" >> "$GITHUB_OUTPUT"
+
       - name: Ensure release exists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,10 +111,10 @@ jobs:
               "${{ steps.ref.outputs.tag }}" \
               --target "${{ github.sha }}" \
               --title "${{ steps.ref.outputs.tag }}" \
-              --notes ""
+              --notes-file "${{ steps.notes.outputs.path }}"
           fi
 
       - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ steps.ref.outputs.tag }}" dist/usage.app.zip --clobber
+        run: gh release upload "${{ steps.ref.outputs.tag }}" dist/usage.app.zip dist/usage.app.zip.sha256 --clobber

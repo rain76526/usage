@@ -6,9 +6,9 @@
 [![Latest Release](https://img.shields.io/github/v/release/aqua5230/usage)](https://github.com/aqua5230/usage/releases/latest)
 [![Python](https://img.shields.io/badge/python-3.13-blue.svg)](https://www.python.org/)
 [![Platform](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos/)
-[![License](https://img.shields.io/github/license/aqua5230/usage)](LICENSE)
+[![License: AGPL-3.0](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-`usage` 是一個 macOS menu bar（螢幕右上角的選單列）小工具，把 **Claude Code 跟 Codex** 的用量同時釘在你的螢幕右上角。點開可以看到這 5 小時用了多少、這 7 天用了多少、今日 token 用量與成本估算。
+`usage` 是一個 macOS menu bar（螢幕右上角的選單列）小工具，把 **Claude Code 跟 Codex** 的用量釘在你的螢幕右上角。點開可以看到 Session、Weekly、各專案用量（今日 / 7 日 / 月），以及今日 token 用量與成本估算。
 
 不呼叫 Anthropic / OpenAI 的 API（接口）、也不讀 Keychain（macOS 內建的密碼保險箱），所以不會發生「自己每分鐘 ping 一次也算用量」這種事。
 
@@ -18,7 +18,7 @@
 
 ## 它怎麼拿到你的用量數字
 
-用量數字來自 Claude Code 跟 Codex 在你本機留下的檔案，不呼叫 Anthropic / OpenAI 的 API。唯一的例外：估算 Codex 成本時需要 token 單價表，如果本機沒有快取（`~/.claude/pricing_cache.json`），會嘗試從公開的 [LiteLLM 價格表](https://github.com/BerriAI/litellm) 下載一次並存起來，7 天後過期再抓。下載失敗的話會用內建的 fallback 價格，不影響用量百分比的顯示。首次啟動若沒快取會同步抓一次，網路慢時可能要等 ~10 秒。
+用量數字來自 Claude Code 跟 Codex 在你本機留下的檔案，不呼叫 Anthropic / OpenAI 的 API。會連網的只有兩件事：(1) 估算 Codex 成本時需要 token 單價表，如果本機沒有快取（`~/.claude/pricing_cache.json`），會嘗試從公開的 [LiteLLM 價格表](https://github.com/BerriAI/litellm) 下載一次並存起來，7 天後過期再抓——下載失敗會用內建 fallback 價格，不影響用量百分比顯示，首次啟動若沒快取會同步抓一次，網路慢時可能要等 ~10 秒；(2) v0.11.0 起每天最多一次到 GitHub Releases API 查有沒有新版（可在「更換面板」選單關掉）。
 
 ### Claude Code 用量
 
@@ -45,7 +45,7 @@ flowchart LR
 
 1. `~/.claude/usage-status.json` —— usage 自己 hook 寫的
 2. `~/.claude/usag-status.json` —— v0.1.x legacy 自動 fallback，新使用者不會碰到
-3. `~/.claude/tt-status.json` —— 備援；如果你也裝過 [token-tracker](https://github.com/stormzhang/token-tracker)，usage 會直接共用它的狀態檔
+3. `~/.claude/tt-status.json` —— 備援；給從第三方工具 [stormzhang/token-tracker](https://github.com/stormzhang/token-tracker) 升級過來的使用者，usage 會直接共用它的狀態檔（**注意：跟本專案的整合無關，純粹相容外部社群工具**）
 
 ### Codex 用量
 
@@ -78,13 +78,15 @@ Codex CLI 沒有 statusLine hook 這種機制，所以 usage 採另一條路：�
 
 第一次打開 usage，如果你還沒「對接」過 Claude Code，popover 會偵測到「找不到狀態檔」，**最下面會多出一顆「立即安裝 hook」按鈕**，按一下就會幫你裝好。然後**完全結束 Claude Code（Cmd+Q）再重新打開一次**，在 usage 視窗按「立即更新」，數字就會跑出來。
 
-如果按鈕沒出現（代表 usage 已經抓到資料了，例如你之前裝過 [token-tracker](https://github.com/stormzhang/token-tracker)），就什麼都不用做。
+如果按鈕沒出現（代表 usage 已經抓到資料了，例如你之前裝過第三方工具 [stormzhang/token-tracker](https://github.com/stormzhang/token-tracker)），就什麼都不用做。
 
 > **備援：手動 curl 安裝**
-> 若按鈕按了沒反應、或你想用指令模式裝，打開 Terminal（終端機）貼這一行：
+> 若按鈕按了沒反應、或你想用指令模式裝，打開 Terminal（終端機）執行以下指令（先下載、確認內容後再執行，比較安全）：
 >
 > ```bash
-> bash <(curl -fsSL https://raw.githubusercontent.com/aqua5230/usage/main/scripts/install-hook.sh)
+> curl -fsSL https://raw.githubusercontent.com/aqua5230/usage/main/scripts/install-hook.sh -o /tmp/usage-install.sh
+> cat /tmp/usage-install.sh   # 可先瀏覽腳本內容
+> bash /tmp/usage-install.sh
 > ```
 
 ## 拿到原始碼
@@ -150,28 +152,23 @@ python3 main.py
 
   <img src="docs/menubar.png" alt="menu bar 上方顯示樣式" width="240">
 
-- **點一下會展開 popover**，分三塊：
-  1. 上面兩張卡片分別是 Claude Code 跟 Codex，每張各有 Session（這 5 小時）跟 Weekly（這 7 天）兩條進度條，旁邊標重置倒數
-  2. 最下面那張小卡是目前速率、同步狀態、今日 token 用量與成本估算（Claude 若 log 有提供實際金額則直接顯示；Codex 成本為依 token 數估算）
-  3. 兩顆按鈕：「立即更新」、「結束」
-- **切換面板**（v0.3.0+）：在 Claude Code 卡片的右上角有一顆「⇄ 更換」按鈕（台灣面板則放在頂部標題列裡），點下去會跳出選單列出可選的面板樣式。目前內建六款：
-  - **預設**：原本兩張卡 + 速率/狀態/今日 的英式風格
-  - **台灣用量監控**：紅底白字、上方加一條含 TAIWAN 旗 icon 的標題列
-  - **駭客任務**（v0.3.1+）：黑底綠字數位雨動畫，Matrix 風格終端機介面
-  - **ECG 心電圖**：醫療監視器風格，LEAD A（Claude）與 LEAD B（Codex）各有一條即時 ECG 波形動畫，振幅跟著 quota 使用率變化，速率越高波形越激烈
-  - **Minimal**（v0.3.3+）：深色簡約風格，Linear / Raycast 設計語言。純黑底色、圓角卡片、accent 色進度條（Claude 暖橘 / Codex 青色）；頁尾卡片以左標籤 + 右數值的雙欄結構呈現速率、狀態、今日花費
-  - **手繪**（v0.3.4+）：Excalidraw 手繪塗鴉風格。珊瑚粉底色、米白卡片、粗黑邊框、卡片四角畫釘裝飾；Claude 深橘紅、Codex 深青綠，視覺輕鬆活潑
+- **點一下會展開 popover**，分四塊：
+  1. 上面兩張卡片分別是 Claude Code 跟 Codex；每張各有 Session 跟 Weekly 兩條進度條
+  2. 專案用量卡：列出近期用量前三名的專案，可點右上角按鈕在「今日 / 7 日 / 月」三段之間切換
+  3. 最下面那張小卡是目前速率、同步狀態、今日 token 用量與成本估算（Claude 若 log 有提供實際金額則直接顯示；Codex 成本為依 token 數估算）
+  4. 兩顆按鈕：「立即更新」、「結束」
+- **面板**：點右上角「更換面板」按鈕可切換面板樣式。目前內建九款面板——「預設」（簡潔白色卡片）、「駭客任務」（黑底螢光綠＋數位雨動畫）、「視窗 95」（Windows 95 復古介面）、「復古報紙」（米黃報紙風）、「雲圖觀測」（氣象風玻璃卡片）、「午夜水族箱」（深海動畫）、「稜鏡街機」（彩虹全息動畫）、「黑洞視界」（旋轉吸積盤）、以及全新「世界盃 2026」——FIFA 轉播 HUD 風格，鮮綠球場、棒人球員追球踢球互動動畫、雙向對戰記分條。
 
   <p align="center">
-    <img src="docs/popover.png" alt="預設面板" width="180">
-    <img src="docs/popover-taiwan.png" alt="台灣用量監控面板" width="180">
-    <img src="docs/popover-matrix.png" alt="駭客任務面板" width="180">
-    <img src="docs/popover-ecg.png" alt="ECG 心電圖面板" width="180">
-    <img src="docs/popover-minimal.png" alt="Minimal 面板" width="180">
-    <img src="docs/popover-sketch.png" alt="手繪面板" width="180">
+    <img src="docs/matrix.png" alt="駭客任務面板" width="220">
+    &nbsp;&nbsp;
+    <img src="docs/cloud_observation.png" alt="雲圖觀測面板" width="220">
+    &nbsp;&nbsp;
+    <img src="docs/world_cup.png" alt="世界盃 2026 面板" width="220">
   </p>
 
   選擇會記進 `NSUserDefaults`（macOS 內建的偏好設定儲存區），下次開 app 會記得上次選的面板。
+- **更新檢查（v0.11.0+）**：app 啟動會自動到 GitHub Releases 查最新版（24 小時最多一次，避免每次開都被打擾）。發現新版會跳對話框顯示版本＋ release notes，三顆按鈕：「前往下載 / 稍後再說 / 跳過此版本」。「更換面板」選單裡有「自動檢查更新」（可關閉）和「立即檢查更新」兩個項目。
 - **權限提醒**：第一次啟動時，macOS 可能會問你要不要讓它在背景跑，點「允許」就好。
 
 ### 終端機 TUI 模式
@@ -189,9 +186,47 @@ python3 main.py --tui
 
 按 `Ctrl+C` 退出。
 
+## 報告與深度分析（CLI）
+
+除了選單列跟 TUI，還有一個分析用的 CLI 進入點 `usage_cli.py`，可以匯出 HTML 報告、或在終端機開互動式 dashboard（儀表板，互動式統計面板）：
+
+<p align="center">
+  <img src="docs/report.png" alt="HTML 報告畫面：你的 AI 用量回顧" width="520">
+</p>
+
+```bash
+source .venv/bin/activate
+
+# 互動式 dashboard（自動偵測 Claude / Codex 兩邊用量，用方向鍵切換）
+python3 usage_cli.py
+
+# 只看 Claude Code / 只看 Codex
+python3 usage_cli.py claude
+python3 usage_cli.py codex
+
+# 產生 HTML 報告並用預設瀏覽器打開（預設範圍：近 30 天）
+python3 usage_cli.py report
+python3 usage_cli.py report --today              # 今日
+python3 usage_cli.py report --week               # 本週
+python3 usage_cli.py report --month              # 本月
+python3 usage_cli.py report --all                # 全部資料
+python3 usage_cli.py report --out report.html    # 另存到指定位置
+
+# 純文字統計表
+python3 usage_cli.py daily
+python3 usage_cli.py weekly
+python3 usage_cli.py monthly
+```
+
+HTML 報告包含：每日 / 週 / 月 token 與成本走勢、各專案排名、Top 模型分布。右上角的「分享」按鈕可另存 `.html` 或複製檔案路徑，透過 AirDrop / Mail / Slack / iMessage 把報告傳給同事或主管；對方瀏覽器打開即可閱讀。報告內含「隱藏專案名稱」勾選框（預設打勾，隱私優先），勾選後另存的 HTML 會把所有專案名稱替換成 `Project 1 / Project 2 / ...`，不影響當前螢幕顯示。
+
 ## 開機自動啟動
 
 LaunchAgent 是 macOS 內建的背景服務管理器（負責「使用者登入後要幫忙啟動哪些程式」），可以讓 usage 在你登入時自動跑起來，不用每次手動啟動。
+
+**最簡單的做法**：點選單列圖示展開 popover，按「⇄ 更換面板」按鈕，選單最下面有「開機自動啟動」一項，勾選即可。.app 版與原始碼版皆適用，不需跑任何指令。
+
+下面的腳本是給原始碼使用者的另一種安裝方式：
 
 1. **安裝**：
    ```bash
@@ -241,11 +276,32 @@ python3 main.py --tui --mock
 USAGE_DEBUG=1 python3 main.py
 ```
 
+## 語言
+
+usage 會自動偵測 macOS 系統語言，目前支援：
+
+| 系統語言 | 顯示語言 |
+|---------|---------|
+| 繁體中文 | 繁體中文 |
+| 簡體中文 | 简体中文 |
+| 日文 | 日本語 |
+| 韓文 | 한국어 |
+| 其他 | English |
+
+開發或測試時可用環境變數強制指定：
+
+```bash
+USAGE_LANG=en python3 main.py      # 英文
+USAGE_LANG=ja python3 main.py      # 日文
+USAGE_LANG=ko python3 main.py      # 韓文
+USAGE_LANG=zh-CN python3 main.py   # 簡體中文
+```
+
 ## 一些行為說明
 
-- usage 只讀 `~/.claude/usage-status.json`、v0.1.x 留下的 `~/.claude/usag-status.json`、`~/.claude/tt-status.json`，以及 Codex 的 session 檔。不呼叫 Anthropic / OpenAI API、不讀 Keychain。唯一會連網的情況是首次估算 Codex 成本時下載 LiteLLM 價格表（快取 7 天，離線也能用 fallback）。
+- usage 只讀 `~/.claude/usage-status.json`、v0.1.x 留下的 `~/.claude/usag-status.json`、`~/.claude/tt-status.json`，以及 Codex 的 session 檔。不呼叫 Anthropic / OpenAI API、不讀 Keychain。會連網的情況有兩個：(a) 首次估算 Codex 成本時下載 LiteLLM 價格表（快取 7 天，離線也能用 fallback）；(b) v0.11.0 起每天最多一次到 GitHub Releases API 查有沒有新版（可在「更換面板」選單關閉）。
 - Claude Code 沒在跑的時候，狀態檔不會更新；但因為實際用量也不會變（除非重置時間到了），所以顯示的數字仍然是有效的；重置時間過了會自動歸零。
-- 如果狀態檔超過 6 小時沒被更新過，會在狀態訊息標註「狀態檔已 N 分鐘未更新，數字可能過時」。
+- 如果狀態檔超過 6 小時沒被更新過，會在狀態訊息標註 `⚠ usage stale Nm`（N 為實際分鐘數），提示資料可能過時。
 
 ## 常見問題排查
 
@@ -263,6 +319,7 @@ USAGE_DEBUG=1 python3 main.py
 | Codex 那塊空白或不顯示 | `~/.codex/sessions/` 不存在，或還沒有含 rate_limits 的 token_count 事件 | 用 Codex 跑一次對話，等它寫入紀錄 |
 | 今日花費是 $0.00 | 模型名稱對不上 pricing 表，或 pricing 下載 / 快取失敗 | 刪掉 `~/.claude/pricing_cache.json` 讓它重新抓；或設 `USAGE_DEBUG=1` 看錯誤訊息 |
 | app 雙擊打不開 | macOS Gatekeeper 擋住未簽章的 app | Finder → 找到 `usage.app` → 按住 Ctrl 右鍵 → 打開 → 確認打開 |
+| app 一打開就閃退（macOS Sequoia / arm64） | 你裝的是 v0.10.x 或 v0.11.0，這幾版有 py2app 打包 bug | 升級到 **v0.11.1 或更新**，到 [Releases](https://github.com/aqua5230/usage/releases/latest) 重新下載 `usage.app.zip` |
 | **Windows**：跑完 `--setup` 後 `usage-status.json` 始終不出現 | 舊版 `setup_hook.py` 在 `statusLine.command` 裡用反斜線路徑；Claude Code 在 Windows 透過 Git Bash 執行 hook，Git Bash 把反斜線當 escape 字元吃掉，hook 路徑被截斷導致從未執行 | 更新到最新版後重跑 `python windows_usage.py --setup`，再重啟 Claude Code 一次 |
 
 ## 打包成 .app（不開終端機就能跑）
@@ -327,3 +384,13 @@ python windows_usage.py --mock
 視窗操作：
 - **拖動**：點住視窗任意位置移動
 - **右鍵選單**：Refresh（立即更新）/ 切換面板 / Quit（結束）
+
+## 授權
+
+採用 AGPL-3.0-only（見頂部 badge 與 [LICENSE](LICENSE)）。若 fork 或發佈衍生版本，請標注原作者與專案連結：https://github.com/aqua5230/usage
+
+## 支持這個專案
+
+如果這個工具幫到你、歡迎請我喝杯咖啡 ☕
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-FF5E5B?logo=ko-fi&logoColor=white)](https://ko-fi.com/lollapalooza)

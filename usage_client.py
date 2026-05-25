@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
 import time
@@ -8,11 +9,16 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
 
+from i18n import _t
+from usage_lang import detect_lang
+
+logger = logging.getLogger(__name__)
+
 STATUS_FILE = os.path.expanduser("~/.claude/usage-status.json")
 LEGACY_STATUS_FILE = os.path.expanduser("~/.claude/usag-status.json")
 TT_STATUS_FILE = os.path.expanduser("~/.claude/tt-status.json")
 
-# 檔案多久沒更新就視為 stale；只用在訊息提示，不影響數字顯示
+# Stale files only affect hints; quota values still render.
 STALE_SECONDS = 6 * 3600
 
 
@@ -33,6 +39,8 @@ class UsageSnapshot:
     weekly_reset_at: float
     current_status: str
     polled_at: float
+    is_stale: bool = False
+    data_source: str = "hook"
 
 
 @dataclass(slots=True)
@@ -40,6 +48,8 @@ class PollOutcome:
     state: PollState
     snapshot: UsageSnapshot | None = None
     message: str | None = None
+    _mtime: float | None = None
+    _status_path: str | None = None
 
 
 def _pct(value: Any) -> int:
@@ -70,22 +80,45 @@ def _as_finite_float(value: Any) -> float | None:
     return numeric if math.isfinite(numeric) else None
 
 
-def _read_status_file() -> tuple[dict[str, Any], str] | None:
-    """讀任一份可用的 status JSON，優先 usage 自己的，fallback 舊檔與 token-tracker。"""
+def _read_status_file() -> tuple[dict[str, Any], str, float] | None:
+    """Read the first available status JSON, preferring usage-owned files."""
     for path in (STATUS_FILE, LEGACY_STATUS_FILE, TT_STATUS_FILE):
-        if not os.path.exists(path):
+        try:
+            mtime = os.stat(path).st_mtime
+        except OSError:
             continue
         try:
             with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
+            if os.environ.get("USAGE_DEBUG") == "1":
+                logger.warning("failed to read status file %s", path, exc_info=True)
             continue
         if isinstance(data, dict):
-            return data, path
+            return data, path, mtime
+        if os.environ.get("USAGE_DEBUG") == "1":
+            logger.warning("status file %s is not a JSON object", path)
     return None
 
 
-def _build_snapshot(data: dict[str, Any]) -> UsageSnapshot | None:
+def _source_from_path(source_path: str) -> str:
+    if source_path == TT_STATUS_FILE:
+        return "tt-fallback"
+    return "hook"
+
+
+def _has_complete_rate_limits(data: dict[str, Any]) -> bool:
+    rl = data.get("rate_limits")
+    if not isinstance(rl, dict):
+        return False
+    five = rl.get("five_hour")
+    seven = rl.get("seven_day")
+    if not isinstance(five, dict) or not isinstance(seven, dict):
+        return False
+    return five.get("used_percentage") is not None and seven.get("used_percentage") is not None
+
+
+def _build_snapshot(data: dict[str, Any], *, data_source: str = "hook") -> UsageSnapshot | None:
     rl = _as_dict(data.get("rate_limits"))
     five = _as_dict(rl.get("five_hour"))
     seven = _as_dict(rl.get("seven_day"))
@@ -99,7 +132,7 @@ def _build_snapshot(data: dict[str, Any]) -> UsageSnapshot | None:
     five_reset = _reset_at(five.get("resets_at"), now)
     seven_reset = _reset_at(seven.get("resets_at"), now)
 
-    # reset 時間到了就把百分比歸零（跟 token-tracker 同邏輯）
+    # Reset expired percentages to match Claude Code rate-limit semantics.
     five_pct = (
         0
         if five_reset and five_reset < now
@@ -128,19 +161,18 @@ def _build_snapshot(data: dict[str, Any]) -> UsageSnapshot | None:
         weekly_reset_at=seven_reset,
         current_status=status,
         polled_at=polled_at,
+        is_stale=(now - polled_at) > STALE_SECONDS,
+        data_source=data_source,
     )
 
 
 class ClaudeUsageClient:
-    """從 Claude Code statusLine hook 寫的本地 JSON 讀取配額狀態。
-
-    保留 async 介面、interval_seconds 參數，方便沿用既有 polling 迴圈
-    （即使讀檔不需要等，main loop 還是會以 interval 為節奏更新 UI）。
-    """
+    """Read quota state from the local JSON written by the Claude Code statusLine hook."""
 
     def __init__(self, *, interval_seconds: int = 60, mock: bool = False) -> None:
         self.interval_seconds = interval_seconds
         self.mock = mock
+        self._last_outcome: PollOutcome | None = None
 
     async def aclose(self) -> None:
         return None
@@ -151,28 +183,57 @@ class ClaudeUsageClient:
 
         result = _read_status_file()
         if result is None:
+            self._last_outcome = None
             return PollOutcome(
                 state=PollState.TOKEN_ERROR,
-                message="⚠ 找不到狀態檔，請執行 `python3 main.py --setup` 並打開一次 Claude Code",
+                message=_t(detect_lang(), "usage_status_missing"),
             )
 
-        data, source_path = result
-        snapshot = _build_snapshot(data)
-        if snapshot is None:
-            return PollOutcome(
+        data, source_path, mtime = result
+        if (
+            self._last_outcome is not None
+            and self._last_outcome._status_path == source_path
+            and self._last_outcome._mtime == mtime
+        ):
+            return self._last_outcome
+
+        if not _has_complete_rate_limits(data):
+            outcome = PollOutcome(
                 state=PollState.LOADING,
-                message="⚠ 狀態檔尚無配額資料，等 Claude Code 再刷新一次 statusLine",
+                message="awaiting_rate_limits",
+                _mtime=mtime,
+                _status_path=source_path,
             )
+            self._last_outcome = outcome
+            return outcome
+
+        snapshot = _build_snapshot(data, data_source=_source_from_path(source_path))
+        if snapshot is None:
+            outcome = PollOutcome(
+                state=PollState.LOADING,
+                message=_t(detect_lang(), "usage_status_no_quota"),
+                _mtime=mtime,
+                _status_path=source_path,
+            )
+            self._last_outcome = outcome
+            return outcome
 
         now = time.time()
-        is_stale = (now - snapshot.polled_at) > STALE_SECONDS
-        source_tag = "tt-status" if source_path == TT_STATUS_FILE else "usage"
-        message = f"✓ 已同步（{source_tag}）"
-        if is_stale:
+        message = None
+        if snapshot.is_stale:
+            source_tag = "tt-status" if snapshot.data_source == "tt-fallback" else "usage"
             mins = int((now - snapshot.polled_at) / 60)
-            message = f"⚠ 狀態檔已 {mins} 分鐘未更新，數字可能過時"
+            message = f"⚠ {source_tag} stale {mins}m"
 
-        return PollOutcome(state=PollState.SUCCESS, snapshot=snapshot, message=message)
+        outcome = PollOutcome(
+            state=PollState.SUCCESS,
+            snapshot=snapshot,
+            message=message,
+            _mtime=mtime,
+            _status_path=source_path,
+        )
+        self._last_outcome = outcome
+        return outcome
 
     def _mock_outcome(self) -> PollOutcome:
         now = time.time()
@@ -185,6 +246,8 @@ class ClaudeUsageClient:
                 weekly_reset_at=now + ((6 * 24) + 8) * 3600,
                 current_status="ok",
                 polled_at=now,
+                is_stale=False,
+                data_source="hook",
             ),
-            message="✓ 已同步",
+            message=None,
         )

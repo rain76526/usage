@@ -47,7 +47,7 @@ def test_group_reads_force_group_env(
     value: str,
     expected: int,
 ) -> None:
-    monkeypatch.setenv("USAG_FORCE_GROUP", value)
+    monkeypatch.setenv("USAGE_FORCE_GROUP", value)
     monkeypatch.setattr(usage_rate, "load_entries", lambda hours_back: [_entry(10)])
 
     assert usage_rate.UsageRateTracker().group() == expected

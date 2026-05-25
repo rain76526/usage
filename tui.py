@@ -1,15 +1,20 @@
 from __future__ import annotations
 
+import json
 import math
 import time
 from dataclasses import dataclass, field
+from functools import lru_cache
+from pathlib import Path
 
+from Foundation import NSLocale
 from rich.align import Align
 from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from i18n import packaged_resource_path
 from tui_sprite import render_sprite
 from usage_client import PollState, UsageSnapshot
 
@@ -26,103 +31,48 @@ SPINNER_FRAMES = ["·", "✻", "✽", "✶", "✳", "✢"]
 SPINNER_PHASES = [0, 1, 2, 3, 4, 5, 4, 3, 2, 1]
 SPINNER_PHASE_MS = [260, 130, 130, 130, 130, 260, 130, 130, 130, 130]
 LOADING_INTERVAL_MS = 4000
+I18N_PATH = packaged_resource_path("i18n.json", Path(__file__).with_name("i18n.json"))
 
-LOADING_PHRASES = [
-    "Accomplishing",
-    "Elucidating",
-    "Perusing",
-    "Actioning",
-    "Enchanting",
-    "Philosophising",
-    "Actualizing",
-    "Envisioning",
-    "Pondering",
-    "Baking",
-    "Finagling",
-    "Pontificating",
-    "Booping",
-    "Flibbertigibbeting",
-    "Processing",
-    "Brewing",
-    "Forging",
-    "Puttering",
-    "Calculating",
-    "Forming",
-    "Puzzling",
-    "Cerebrating",
-    "Frolicking",
-    "Reticulating",
-    "Channelling",
-    "Generating",
-    "Ruminating",
-    "Churning",
-    "Germinating",
-    "Scheming",
-    "Clauding",
-    "Hatching",
-    "Schlepping",
-    "Coalescing",
-    "Herding",
-    "Shimmying",
-    "Cogitating",
-    "Honking",
-    "Shucking",
-    "Combobulating",
-    "Hustling",
-    "Simmering",
-    "Computing",
-    "Ideating",
-    "Smooshing",
-    "Concocting",
-    "Imagining",
-    "Spelunking",
-    "Conjuring",
-    "Incubating",
-    "Spinning",
-    "Considering",
-    "Inferring",
-    "Stewing",
-    "Contemplating",
-    "Jiving",
-    "Sussing",
-    "Cooking",
-    "Manifesting",
-    "Synthesizing",
-    "Crafting",
-    "Marinating",
-    "Thinking",
-    "Creating",
-    "Meandering",
-    "Tinkering",
-    "Crunching",
-    "Moseying",
-    "Transmuting",
-    "Deciphering",
-    "Mulling",
-    "Unfurling",
-    "Deliberating",
-    "Mustering",
-    "Unravelling",
-    "Determining",
-    "Musing",
-    "Vibing",
-    "Discombobulating",
-    "Noodling",
-    "Wandering",
-    "Divining",
-    "Percolating",
-    "Whirring",
-    "Doing",
-    "Wibbling",
-    "Effecting",
-    "Wizarding",
-    "Working",
-    "Wrangling",
-]
+
+@lru_cache(maxsize=1)
+def _load_i18n_bundle() -> dict[str, dict[str, str]]:
+    data = json.loads(I18N_PATH.read_text(encoding="utf-8"))
+    return {
+        str(lang): {str(key): str(value) for key, value in values.items()}
+        for lang, values in data.items()
+    }
+
+
+def _normalize_language(code: str | None) -> str:
+    if code and code.lower().startswith("zh"):
+        return "zh-TW"
+    return "en"
+
+
+def _detect_language() -> str:
+    try:
+        locale = NSLocale.currentLocale()
+        code_attr = getattr(locale, "languageCode", None)
+        code = code_attr() if callable(code_attr) else code_attr
+        return _normalize_language(str(code) if code is not None else None)
+    except Exception:
+        return "en"
+
+
+def _t(language: str, key: str, **kwargs: object) -> str:
+    bundle = _load_i18n_bundle()
+    table = bundle.get(language) or bundle["en"]
+    template = table.get(key) or bundle["en"].get(key) or key
+    return template.format(**kwargs)
+
+
+def _loading_phrases(language: str) -> list[str]:
+    return _t(language, "loading_phrases").split("|")
 
 
 @dataclass(slots=True)
 class AppViewState:
+    language: str = field(default_factory=_detect_language)
     poll_state: PollState = PollState.LOADING
     snapshot: UsageSnapshot | None = None
     message: str = ""
@@ -131,7 +81,7 @@ class AppViewState:
     rate_group: int = 0
 
 
-def format_countdown(reset_at: float, now: float | None = None) -> str:
+def format_countdown(reset_at: float, language: str, now: float | None = None) -> str:
     current_time = now if now is not None else time.time()
     remaining = max(0, math.ceil(reset_at - current_time))
     days, rem = divmod(remaining, 86400)
@@ -139,10 +89,10 @@ def format_countdown(reset_at: float, now: float | None = None) -> str:
     minutes, seconds = divmod(rem, 60)
 
     if days > 0:
-        return f"Resets in {days}d {hours}h"
+        return _t(language, "resets_in_days", days=days, hours=hours)
     if hours > 0:
-        return f"Resets in {hours}h {minutes}m"
-    return f"Resets in {minutes}m {seconds}s"
+        return _t(language, "resets_in_hours", hours=hours, minutes=minutes)
+    return _t(language, "resets_in_minutes", minutes=minutes, seconds=seconds)
 
 
 def _bar_style(percent: int) -> str:
@@ -165,7 +115,13 @@ def _chip(label: str) -> Text:
     return Text(f" {label} ", style=f"bold {TEXT} on {PANEL}")
 
 
-def _usage_block(percent: int, label: str, reset_at: float, now: float) -> RenderableType:
+def _usage_block(
+    percent: int,
+    label: str,
+    reset_at: float,
+    now: float,
+    language: str,
+) -> RenderableType:
     row = Table.grid(expand=False, padding=(0, 1))
     row.add_column(width=4)
     row.add_column(width=16)
@@ -176,11 +132,11 @@ def _usage_block(percent: int, label: str, reset_at: float, now: float) -> Rende
         _chip(label),
     )
 
-    countdown = Text.assemble("    ", (format_countdown(reset_at, now), DIM))
+    countdown = Text.assemble("    ", (format_countdown(reset_at, language, now), DIM))
     return Group(row, countdown)
 
 
-def _missing_usage_block(label: str) -> RenderableType:
+def _missing_usage_block(label: str, language: str) -> RenderableType:
     row = Table.grid(expand=False, padding=(0, 1))
     row.add_column(width=4)
     row.add_column(width=16)
@@ -190,7 +146,7 @@ def _missing_usage_block(label: str) -> RenderableType:
         _build_progress_line(0, width=15),
         _chip(label),
     )
-    return Group(row, Text("    Resets in --", style=DIM))
+    return Group(row, Text(f"    {_t(language, 'resets_in_placeholder')}", style=DIM))
 
 
 def _spinner_frame(now: float, started_at: float) -> str:
@@ -209,19 +165,20 @@ def _spinner_frame(now: float, started_at: float) -> str:
 def _status_line(state: AppViewState, now: float) -> Text:
     spinner = _spinner_frame(now, state.started_at)
     elapsed_ms = (now - state.started_at) * 1000
-    phrase_index = int(elapsed_ms / LOADING_INTERVAL_MS) % len(LOADING_PHRASES)
+    phrases = _loading_phrases(state.language)
+    phrase_index = int(elapsed_ms / LOADING_INTERVAL_MS) % len(phrases)
 
     color = ACCENT
-    phrase = LOADING_PHRASES[phrase_index]
+    phrase = phrases[phrase_index]
 
     if state.poll_state == PollState.RATE_LIMITED:
-        phrase = "⚠ Rate limit reached"
+        phrase = _t(state.language, "status_rate_limited")
         color = RED
     elif state.poll_state == PollState.TOKEN_ERROR:
-        phrase = "⚠ Token unavailable"
+        phrase = _t(state.language, "status_token_unavailable")
         color = ACCENT
     elif state.poll_state in (PollState.CONNECTION_ERROR, PollState.FATAL):
-        phrase = "⚠ API offline"
+        phrase = _t(state.language, "status_api_offline")
         color = RED
 
     return Text.assemble(
@@ -236,7 +193,12 @@ def render_screen(state: AppViewState, frame_index: int) -> Panel:
     panel_width = min(Console().size.width, 60)
 
     # Group label and colors
-    groups = ["Idle", "Normal", "Active", "Heavy"]
+    groups = [
+        _t(state.language, "group_idle"),
+        _t(state.language, "group_normal"),
+        _t(state.language, "group_active"),
+        _t(state.language, "group_heavy"),
+    ]
     group_colors = [DIM, TEXT, ACCENT, RED]
     group_label = groups[state.rate_group]
     group_color = group_colors[state.rate_group]
@@ -265,7 +227,7 @@ def render_screen(state: AppViewState, frame_index: int) -> Panel:
 
     title_table.add_row(
         render_sprite(frame_index),
-        Text.assemble(("  Usage  ", f"bold {TEXT}"), title_left),
+        Text.assemble((f"  {_t(state.language, 'usage_title')}  ", f"bold {TEXT}"), title_left),
         Text("🔋"),
     )
 
@@ -273,31 +235,33 @@ def render_screen(state: AppViewState, frame_index: int) -> Panel:
 
     if state.snapshot is None:
         loading_block = Group(
-            _usage_block(0, "Current", now + 3600, now),
+            _usage_block(0, _t(state.language, "current_label"), now + 3600, now, state.language),
             Text(""),
-            _usage_block(0, "Weekly", now + 86400, now),
+            _usage_block(0, _t(state.language, "weekly_label"), now + 86400, now, state.language),
         )
         body_items.append(loading_block)
     else:
         current_block = (
             _usage_block(
                 state.snapshot.current_percent,
-                "Current",
+                _t(state.language, "current_label"),
                 state.snapshot.current_reset_at,
                 now,
+                state.language,
             )
             if state.snapshot.current_percent is not None
-            else _missing_usage_block("Current")
+            else _missing_usage_block(_t(state.language, "current_label"), state.language)
         )
         weekly_block = (
             _usage_block(
                 state.snapshot.weekly_percent,
-                "Weekly",
+                _t(state.language, "weekly_label"),
                 state.snapshot.weekly_reset_at,
                 now,
+                state.language,
             )
             if state.snapshot.weekly_percent is not None
-            else _missing_usage_block("Weekly")
+            else _missing_usage_block(_t(state.language, "weekly_label"), state.language)
         )
         body_items.append(
             Group(

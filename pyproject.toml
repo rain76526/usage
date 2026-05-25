@@ -1,13 +1,15 @@
 [project]
 name = "usage"
-version = "0.3.4"
+version = "0.11.1"
 description = "usage — 在 macOS menu bar 顯示 Claude Code 用量的繁中小工具（也提供終端機 TUI）"
 readme = "README.md"
 requires-python = ">=3.13"
-license = "MIT"
+license = "AGPL-3.0-only"
 license-files = ["LICENSE"]
 dependencies = [
     "pyobjc-framework-Cocoa>=11.0 ; sys_platform == 'darwin'",
+    "pyobjc-framework-Quartz>=11.0 ; sys_platform == 'darwin'",
+    "pyobjc-framework-WebKit>=11.0 ; sys_platform == 'darwin'",
     "rich>=14.0.0,<15.0.0",
 ]
 
@@ -25,11 +27,22 @@ py-modules = [
     "usage_rate",
     "usage_statusline",
     "setup_hook",
+    "login_item",
     "usage_client",
     "codex_loader",
     "tui_sprite",
     "windows_widget",
+    "i18n",
+    "usage_cli",
+    "burn_rate",
+    "update_checker",
+    "tips_loader",
+    "usage_lang",
+    "usage_statusline_forwarder",
 ]
+
+[tool.setuptools.packages.find]
+include = ["adapters*", "analyzer*", "panels*", "ui*"]
 
 [dependency-groups]
 dev = [
@@ -53,16 +66,33 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 # usage_statusline.py 設計成可以用系統 python3 跑（macOS 內建是 3.9），
 # 必須避開 3.11+ 才有的 datetime.UTC，用 timezone.utc 取代。
 "usage_statusline.py" = ["UP017"]
+# Imported analytics source is kept with minimal path fixes; keep formatting
+# stable for this integration commit.
+"adapters/**/*.py" = ["E501", "I001", "SIM108", "UP015", "UP017"]
+"analyzer/**/*.py" = ["E501", "I001", "UP015", "UP017"]
+"ui/**/*.py" = ["E501", "I001", "UP017", "UP035"]
+"usage_cli.py" = ["E501", "I001", "UP017"]
 
 [tool.mypy]
 python_version = "3.13"
 strict = true
 warn_unused_configs = true
 pretty = true
-exclude = "^(build|dist)/"
+exclude = "^(build|dist|adapters|analyzer|ui)/|^usage_cli\\.py$"
+
+[[tool.mypy.overrides]]
+module = ["adapters.*", "analyzer.*", "ui.*"]
+follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 module = "rich.*"
+ignore_missing_imports = true
+
+# PyObjC C-extension frameworks ship without type stubs / py.typed marker.
+# `ignore_missing_imports` is the standard idiom for stubless modules — this
+# is NOT suppressing a real bug, just declaring the frameworks are untyped.
+[[tool.mypy.overrides]]
+module = ["AppKit", "Foundation", "objc", "Quartz", "WebKit"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

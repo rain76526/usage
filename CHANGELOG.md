@@ -4,6 +4,196 @@
 
 本檔記錄 usage 所有重要變更。格式參考 [Keep a Changelog](https://keepachangelog.com/)。
 
+## [Unreleased]
+
+## [0.11.1] - 2026-05-24
+
+### 修正
+- **[P0] 已發佈 .app 在 macOS Sequoia / arm64 一開就閃退**（感謝 @cmhcm 的 [#6](https://github.com/aqua5230/usage/pull/6)）：v0.10.0 / v0.10.1 / v0.11.0 三個 release 都受影響。Root cause 是 `i18n.py` 在 py2app 打包後會被壓進 `lib/python313.zip`，但 `i18n.json` 是放在 `Contents/Resources/`；舊版用 `Path(__file__).with_name("i18n.json")` 拼路徑，會變成「穿過 zip 檔的無效路徑」，第一次讀就 `NotADirectoryError` 炸掉。修正：新增 `i18n.packaged_resource_path()` helper，優先讀 py2app 啟動時注入的 `RESOURCEPATH` 環境變數（指向 `Contents/Resources/`），找不到再退回原本的 source-mode 路徑。四個讀打包資源的 call site 全部換新（`i18n.py` / `tui.py` / `main.py` / `menubar.py`），原始碼模式跑法完全不受影響。
+
+### 變更
+- **打包設定補齊**：`pyproject.toml` 的 `py-modules` 補上之前漏掉的 `burn_rate` / `update_checker` / `tips_loader` / `usage_lang` / `usage_statusline_forwarder`，`packages.find` include 補上 `panels*`；非 editable 安裝才能拿到完整程式碼。
+- **`.app` License metadata 對齊**：`setup_app.py` 的 `NSHumanReadableCopyright` 從舊的 `MIT License` 更新成 `Copyright © 2025-2026 lollapalooza. Licensed under AGPL-3.0-only.`，與 `pyproject.toml` 宣告一致。
+- **`pricing_cache.json` 路徑統一**：`analyzer/cost.py` 的快取路徑從專案根目錄改為 `~/.claude/pricing_cache.json`，與 `pricing.py` 同步；移除 repo 根目錄一顆 1.1 MB 的孤兒快取檔。
+- **面板名稱走 i18n**：`panels/__init__.py` 九款面板的顯示名稱改用 `i18n_key`，i18n.json 五語言補齊；英 / 日 / 韓系統的「更換面板」選單不再混入中文面板名。
+- **狀態檔錯誤訊息走 i18n**：`usage_client.py` 的「找不到狀態檔」和「狀態檔尚無配額」兩段提示走 `_t()`，五語言齊全。
+- **analytics CLI 讀檔順序對齊主程式**：`adapters/rate_limits.py` 之前只讀 `~/.claude/tt-status.json`，現在改成 `usage-status.json` → `usag-status.json` → `tt-status.json` 三路 fallback，與 `usage_client.py` 一致。
+- **README 補 v0.11.0 更新檢查說明 + GitHub Releases 網路例外**：README.md / README.en.md 都加上「更新檢查」段落、把 GitHub Releases API 明列為第二個網路例外（第一個仍是 LiteLLM 價格表）。
+
+## [0.11.0] - 2026-05-24
+
+### 新增
+- **App 內檢查更新（Stage 1）**：開 app 時自動到 GitHub Releases 查最新版（24 小時最多檢查一次，避免每次開都被打擾）；發現新版會跳出視窗顯示版本號＋ release notes，三顆按鈕「前往下載 / 稍後再說 / 跳過此版本」。「前往下載」會用預設瀏覽器打開 Release 頁，你手動下載新版蓋掉舊版即可（Stage 2 才會做 Sparkle 全自動下載＋替換）。
+- **「更換面板」選單新增兩條**：
+  - **自動檢查更新**（可勾選）：取消勾選後完全關閉啟動時的自動檢查，只保留手動入口。
+  - **立刻檢查更新**：手動觸發一次檢查，忽略 24h cooldown 與「跳過此版本」設定；沒新版也會跳視窗告知「已是最新版本」，網路錯誤時跳「檢查更新失敗」。
+- 偏好設定沿用既有 `~/.claude/usage-preferences.json`，新增三個 key：`auto_update_check`（預設 true）、`update_dismissed_at`（Unix 時間戳）、`update_skipped_version`（被跳過的版本號）。
+
+### 變更
+- `setup_app.py` 把 `pyproject.toml` 與 `update_checker` 一併納入 py2app 打包——讓 .app 版在 `importlib.metadata` 抓不到版本時可 fallback 讀 `pyproject.toml`。
+
+## [0.10.1] - 2026-05-24
+
+### 修正
+- **Weekly burn-rate 警告誤報**：對 7 天 weekly quota 套用最近 10 分鐘的燒率外推會過度激進（例：56% 已用 → 預測 5h50m 用完 → 顯示「剩 5h50m 用完(重置還要 4d6h)」），實際使用者不會 24/7 維持那速度。修正方式：`_quota_row` 新增 `warning_max_seconds` 參數，weekly 三處呼叫傳入 24h 上限——預測用完時間超過 24 小時就不再警告。session 警告行為完全不變。
+
+## [0.10.0] - 2026-05-24
+
+### 新增
+- **HTML 報告「分享」按鈕**：報告右上角新增分享按鈕，點開後可選「另存一份 .html」或「複製檔案路徑」，把報告透過 AirDrop / Mail / Slack / 訊息傳給同事或主管；對方用瀏覽器打開即可閱讀，手機電腦皆支援。
+- **下載時可隱藏專案名稱**：分享 modal 內含「隱藏專案名稱」勾選框（預設打勾，隱私優先），勾選後另存的 HTML 會把所有專案名稱替換成 `Project 1 / Project 2 / ...`，不影響當前螢幕顯示。
+- **HTML 報告 sponsor 區重做**：兩個 Ko-fi 徽章夾住品牌標語 `No cloud. No tracking. Just yours.`（五語言統一不翻譯），標語帶輕微晃動動畫吸引目光；下方新增 GitHub repo 連結（github.com/aqua5230/usage）。
+
+### 變更
+- **statusLine 第二行（累計問答 / 快取 / 花費）移除**：簡化視覺，主要監控資訊集中在第一行（5h / 7d / Context window）與第三行（會話時長、模型）。
+- **HTML 報告 KPI 卡片寬度調整**：tokens / cost 兩張較寬，sessions / messages / active days 三張較窄（grid 比例 1.5fr 1.4fr 1fr 1fr 1fr），避免 9 位數 token 數字換行。
+
+### 移除
+- HTML 報告底部 `usage · 本機分析 · 資料不離本機` footer 行 —— 由 sponsor 區的 GitHub 連結取代。
+
+## [0.9.1] - 2026-05-23
+
+### 修正
+- **TUI 模式輪詢失效**：`poll_usage` 函式內 `continue` 導致每次 timeout 後直接跳回迴圈頂端，狀態永遠停在初始那次 fetch，之後不再更新。改為 `pass` 使輪詢邏輯正常執行。
+- **環境變數名稱不一致**：`USAG_FORCE_GROUP`（v0.1.x 舊前綴）改為 `USAGE_FORCE_GROUP`，與專案其他環境變數統一命名。
+- **每次 refresh 重複掃 filesystem**：`_refresh_in_background` 原本對 `history_loader.load_entries` 呼叫 4 次（24h × 2、168h × 1、720h × 1），現改為一次性讀取 720h 超集並向下傳遞，省去重複 I/O。
+
+### 變更
+- `pricing.py` User-Agent 從過期的 `usage/0.2` 更新為 `usage/0.9`。
+- `--setup` 執行時不再多印「無需 migration」訊息（全新安裝環境下的無意義輸出）。
+
+## [0.9.0] - 2026-05-22
+
+### 新增
+- **新增「世界盃 2026」面板**：FIFA 電視轉播 HUD 風格。鮮綠球場俯視圖（草皮條紋＋白色場線、中圈、禁區、角弧），深色廣播記分板顯示 Claude / Codex Session 大號數字（38px），雙向對戰條（Claude←中線→Codex）取代傳統單向進度條，Canvas 動畫：一顆五邊形足球在下半區滾動，兩隊各 6 個棒人球員緩慢跑位，距球最近的球員以 0.8 px/frame 追球並踢球改變方向（各隊冷卻 60 frames），底部 MATCH STATS 積分榜，用量 ≥ 85% 時觸發黃金進球彩蛋。
+
+## [0.8.0] - 2026-05-22
+
+### 新增
+- **新增「稜鏡街機」面板**：深紫黑底，Canvas conic 彩虹光暈緩慢旋轉，幾何稜鏡碎片（三角形/菱形）隨機漂移，彩色光點粒子閃爍，卡片採全息漸層邊框（CSS background-clip 技巧），進度條全光譜 rainbow gradient + 掃光。
+- **新增「黑洞視界」面板**：純黑宇宙背景，Canvas 2D 繪製星場（120 顆含閃爍星）、旋轉吸積盤（橙黃白漸層橢圓，都卜勒左亮右暗）、光子環、事件視界藍紫光暈，橙色粒子沿橢圓軌道流動，琥珀色玻璃卡片。
+
+### 修正
+- **修正三個面板底部多餘空隙**：水族箱、稜鏡街機、黑洞視界的 `.projects-card` 補上 `flex: 1`，內容現在正確撐滿面板高度。
+- **三個動畫面板卡片透明度調低**：水族箱、稜鏡街機、黑洞視界卡片 background opacity 從 0.5–0.75 降至 0.14–0.28，背景動畫透出更多。
+
+## [0.7.0] - 2026-05-22
+
+### 新增
+- **新增「午夜水族箱」面板**：第六款內建面板，深海動畫主題 —— Canvas 2D 氣泡上升（42 顆，隨機漂移）、4 隻 CSS 水母（上下浮動＋青色發光）、生物發光粒子點綴背景。玻璃感卡片搭配 backdrop-filter blur，進度條帶掃光動效。新增 i18n key `panel_aquarium`（5 語齊全）。
+- **修正 .app 語言偵測**：改用 `NSLocale.preferredLanguages()` 取代 `currentLocale().localeIdentifier()`，讓 bundle 內語言不再被 `CFBundleDevelopmentRegion = English` 覆寫，繁中使用者點 .app 後正確顯示中文。
+
+## [0.6.9] - 2026-05-22
+
+### 新增
+- **新增「雲圖觀測」面板**：第五款內建面板，氣象風視覺 —— 淡藍天空漸層、白色雲層（feGaussianBlur 柔邊）、淡藍等高線、半透明玻璃卡片。整體淺色調，搭配 backdrop-filter 讓雲透出。新增 i18n key `panel_cloud_observation`（5 語齊全）。
+
+## [0.6.8] - 2026-05-22
+
+### 修正
+- **修正 .app 啟動時找不到 i18n.json**：py2app 打包資源清單補上 `i18n.json`，menu bar 與 Web panel 載入多語系檔案時會優先讀取 `.app` bundle 的 `Contents/Resources/i18n.json`，再 fallback 到原始碼路徑，避免 v0.6.0 以上版本啟動即發生 `FileNotFoundError`。
+
+## [0.6.7] - 2026-05-22
+
+### 修正
+- **燃燒速度警告誤判**：v0.6.6 上線後實測發現,在 app 剛重啟、樣本還不夠的情況下,即使百分比只用了 1% / 14% / 36% 也會跳紅色警告。原因是 2 點斜率只用 2-3 個樣本太不穩,而且低百分比時剩餘緩衝大、根本沒有緊迫性。修正方式加兩道安全閥:預估只在「最近 10 分鐘內樣本 ≥ 5 個、跨度 ≥ 5 分鐘」時才生效;警告只在「當下百分比 ≥ 50%」時才替換 reset 文案。其他情況一律維持原本的「重置 X」顯示。
+
+## [0.6.6] - 2026-05-22
+
+### 新增
+- **燃燒速度警告**：當 app 預估你照目前用法會在額度重置前先用完時，原本「重置 X 分鐘」那行會自動換成紅色警告：「⚠ 剩 X 分用完（重置還要 Y 分）」。沒事的時候面板長得跟原本一樣，完全不打擾。覆蓋 Claude Code Session / Weekly 與 Codex Session / Weekly 共 4 個額度，4 款面板（Classic / Matrix / Newspaper / Win95）各自配對應主題的紅色。內部用 15 分鐘滾動樣本 + 最近 10 分鐘斜率推估，重置時自動清掉舊樣本避免誤報。
+
+## [0.6.5] - 2026-05-22
+
+### 新增
+- **「開機自動啟動」開關**：popover 的「更換面板」選單新增一條可勾選的「開機自動啟動」項目，勾選後 usage 會在你下次登入時自動啟動，不必每次手動開。.app 版與原始碼版會各自產生對應的 LaunchAgent 設定檔；取消勾選只移除設定檔，不會關掉正在執行的 app。
+
+### 變更
+- README「開機自動啟動」章節補上 popover 開關說明（繁中 / 英文）。
+
+## [0.6.4] - 2026-05-22
+
+### 新增
+- **「復古報紙」面板**：第四款內建面板，重現舊報紙頭版風格 —— 米黃報紙底、明體油墨字、雙線版心框、報紙欄頭式標題、細墨線分隔、暖墨實心進度條。卡片排版與資料邏輯沿用 Classic，差異只在 CSS 樣式。
+
+### 修正
+- **繁體中文系統被誤判為簡體中文**：`_detect_language()` 原本讀 `NSLocale.languageCode`，它只回傳不帶地區的 `"zh"`，繁中系統因此被正規化成簡體。改讀保留地區資訊的 `localeIdentifier`（如 `zh_TW`），繁中系統現在正確顯示繁體中文。
+
+### 變更
+- README 面板章節更新為四款面板並列截圖（繁中 / 英文）。
+
+## [0.6.3] - 2026-05-22
+
+### 新增
+- **「視窗 95」面板**：第三款內建面板，重現 Windows 95 經典桌面介面 —— teal 桌布、寶藍漸層標題列、灰色 3D outset 視窗、chunked 分格進度條、凸起塑膠按鈕、Tahoma 字體。
+- **面板可指定專屬視窗尺寸**：`HTMLPanel` 新增 `width` / `height` 參數，每款面板能依內容量使用合身的 popover 尺寸（預設仍為 364×812）。視窗 95 內容較精簡，使用 364×768。
+
+### 變更
+- README 面板章節更新為三款面板並列截圖（繁中 / 英文）。
+
+## [0.6.2] - 2026-05-22
+
+### 修正
+- **駭客任務面板「專案用量」資料夾圖示消失**：三張卡片 inline `style="--accent: var(--accent)"` 是自我參考的 cyclic CSS variable，依 CSS 規範會被判 invalid 並 unset，導致 inline SVG 的 `stroke="var(--accent)"` 取不到顏色變透明。Claude / Codex 卡用 `<img>` 不受影響，但 projects 卡的 SVG 資料夾圖示因此失蹤。`--accent` 已在 `:root` 定義並會 inherit，三個 cyclic inline style 是無意義的覆寫，移除後圖示正常顯示。
+
+## [0.6.1] - 2026-05-22
+
+### 新增
+- **駭客任務（Matrix）面板**：黑底螢光綠字 + 數位雨動畫的第二款面板。卡片標題、配額條、專案排行、footer 全部沿用 Classic 排版，差異只在配色與背景。透過 popover 上的「⇄ 更換面板」按鈕切換。
+- README 補上 Matrix 面板截圖（繁中 / 英文），同時對照 Classic 面板。
+
+### 修正
+- Matrix 面板標題 `line-height: 1` 在 CJK 字符（如「專案用量」「専案使用量」）下方筆畫與 `text-shadow` 光暈會被卡片邊界裁切；改為 `1.25` 後 5 種語系標題完整顯示，與 30×30 圖示維持垂直對齊。
+
+## [0.6.0] - 2026-05-22
+
+### 新增
+- **多語言介面（i18n）**：自動偵測 macOS 系統語言，支援繁體中文、簡體中文、英文、日文、韓文。不需任何設定，系統語言是什麼就顯示什麼。
+- **`USAGE_LANG` 環境變數**：可強制指定語言（例如 `USAGE_LANG=ja`），方便開發與測試。
+
+### 變更
+- **授權從 MIT 改為 AGPL-3.0**：修改後發佈的版本必須開源，保護原作者權益。
+- **popover 底部加入 attribution 小字**：`based on usage by lollapalooza`。
+
+### 修正
+- 移除 `usage_client.py` 中硬寫的中文狀態字串（「✓ 已同步」），改由 i18n 系統統一處理。
+
+## [0.5.0] - 2026-05-21
+
+### 新增
+- **專案用量新增「月」切換**：「今日 / 7 日 / 月」三段循環，可查看近 30 天各專案的 token 用量與費用。
+
+### 修正
+- **專案用量費用正確計算**：之前因為 Claude Code 的 JSONL 沒有寫入 `costUSD` 欄位，所有專案顯示 $0.00；現在改用與「今日費用」相同的 `calculate_cost()` 計算，數字一致。
+- **備援定價 Opus 修正為 $5/M**：離線時備援的 Opus 單價從 $15/M 修正為 $5/M，與 LiteLLM 實際值一致。
+
+### 改善
+- 專案用量的 SVG 圖示尺寸調整為與 Claude Code / Codex 圖示一致（30×30）。
+
+### 移除
+- 移除 Taiwan、Matrix、ECG、Minimal、Sketch 五個 PyObjC 原生面板，統一改為 HTML/CSS 架構，新面板設計中。
+- 移除 Antigravity 用量追蹤（Google OAuth 憑證不應寫入原始碼；功能待架構調整後重新設計）
+
+## [0.4.0] - 2026-05-20
+
+### 新增
+- **預設面板改為 WKWebView + HTML/CSS render**：classic 預設面板改由共用 HTML/CSS 層繪製，為後續 Windows 版本鋪路；macOS 仍透過 `NSPopover` 內嵌 `WKWebView` 呈現。
+- **Antigravity 額度追蹤**：popover 現在顯示 Claude Code / Codex / Antigravity 三張卡；Antigravity 卡含目前用量（Session）與每週上限（Weekly）兩排。
+- Antigravity 桶 `remainingFraction == 1.0`（未使用）時隱藏重置時間，避免 API 滾動 placeholder 顯示成永遠的「重置 ~24h」。
+
+### 變更
+- `antigravity_loader` 依重置視窗自動分流：短窗歸為 Session，長窗歸為 Weekly；Google API 補上週 bucket 時 Weekly 會自動填值。
+- WKWebView 整合加入 JS bridge（refresh / quit / switch）、預先載入與深色 layer，減少開啟時白閃；切換面板時會 teardown 以解除 retain cycle。
+- 面板按鈕加入點擊壓深 + 微縮反饋。
+- 新增依賴：`pyobjc-framework-WebKit`、`pyobjc-framework-Quartz`。
+
+### 移除
+- 移除 `panels/classic.py` CoreGraphics 版本，改由 `HTMLPanel` 取代。
+
+### 內部
+- `codex_loader` / `history_loader._as_int` 型別精確化為 `max(0, int(value))`。
+- 改用 Quartz `CGColorCreateGenericRGB` 建立 `CGColorRef`，消除啟動時的 `ObjCPointerWarning`。
+
 ## 0.3.3 — 2026-05-19
 
 ### 新增

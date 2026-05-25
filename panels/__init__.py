@@ -1,20 +1,18 @@
 from __future__ import annotations
 
 from panels.base import Panel
-from panels.classic import ClassicPanel
-from panels.ecg import ECGPanel
-from panels.matrix import MatrixPanel
-from panels.minimal import MinimalPanel
-from panels.sketch import SketchPanel
-from panels.taiwan import TaiwanPanel
+from panels.web_panel import HTMLPanel
 
 PANELS: tuple[Panel, ...] = (
-    ClassicPanel(),
-    TaiwanPanel,
-    MatrixPanel(),
-    ECGPanel(),
-    MinimalPanel(),
-    SketchPanel(),
+    HTMLPanel("classic", "panel_default_name", "classic.html"),
+    HTMLPanel("matrix", "panel_matrix", "matrix.html"),
+    HTMLPanel("win95", "panel_win95", "win95.html", height=768.0),
+    HTMLPanel("newspaper", "panel_newspaper", "newspaper.html"),
+    HTMLPanel("cloud_observation", "panel_cloud_observation", "cloud_observation.html"),
+    HTMLPanel("aquarium", "panel_aquarium", "aquarium.html"),
+    HTMLPanel("prism_arcade", "panel_prism_arcade", "prism_arcade.html"),
+    HTMLPanel("black_hole", "panel_black_hole", "black_hole.html"),
+    HTMLPanel("world_cup", "panel_world_cup", "world_cup.html"),
 )
 
 
@@ -31,7 +29,3 @@ def get_panel(panel_id: str) -> Panel:
         if panel.id == panel_id:
             return panel
     return PANELS[0]
-
-
-def panel_id_exists(panel_id: str) -> bool:
-    return any(panel.id == panel_id for panel in PANELS)

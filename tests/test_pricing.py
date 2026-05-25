@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.request
@@ -174,6 +175,22 @@ def test_read_cache_bad_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) ->
     monkeypatch.setattr(pricing, "CACHE_PATH", cache_path)
 
     assert pricing._read_cache() is None
+
+
+def test_read_cache_logs_bad_json_in_debug_mode(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    cache_path = tmp_path / "pricing_cache.json"
+    cache_path.write_text("{bad json", encoding="utf-8")
+    monkeypatch.setattr(pricing, "CACHE_PATH", cache_path)
+    monkeypatch.setenv("USAGE_DEBUG", "1")
+
+    with caplog.at_level(logging.WARNING):
+        assert pricing._read_cache() is None
+
+    assert f"failed to decode pricing cache {cache_path}" in caplog.text
 
 
 def test_read_cache_valid(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

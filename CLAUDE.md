@@ -55,7 +55,7 @@ Claude Code ──stdin──> usage_statusline.py (hook) ──write──> ~/.
 
 - **Claude Code side**: `usage_statusline.py` is installed into `~/.claude/usage-statusline.py` by `setup_hook.py` and wired into `~/.claude/settings.json`'s `statusLine`. Every time Claude Code refreshes its status line, it pipes the session JSON to the hook on stdin; the hook atomically writes it to `~/.claude/usage-status.json`. The UI reads that file — never the network.
 - **Codex side**: no hook is possible (Codex CLI has no equivalent), so `codex_loader.py` scans `~/.codex/sessions/**/*.jsonl` and pulls `rate_limits` straight from the conversation logs.
-- **Read priority** in `usage_client.py`: `usage-status.json` → `usag-status.json` (v0.1.x legacy) → `tt-status.json` (token-tracker compatibility fallback).
+- **Read priority** in `usage_client.py`: `usage-status.json` → `usag-status.json` (v0.1.x legacy) → `tt-status.json` (compat fallback for users migrating from the third-party tool `stormzhang/token-tracker`; **NOT an in-repo module — no `token-tracker` directory or source exists anywhere on this machine**).
 
 ### Module map
 
@@ -67,15 +67,27 @@ Claude Code ──stdin──> usage_statusline.py (hook) ──write──> ~/.
 | `history_loader.py` | Parses Claude Code's per-project JSONL logs under `~/.claude/projects/` for token totals and cost. |
 | `pricing.py` | Cost estimation. Downloads LiteLLM's `model_prices_and_context_window.json` once, caches to `~/.claude/pricing_cache.json` (TTL 7 days; 10-min TTL on fallback so offline-then-online recovers). |
 | `usage_rate.py` | Burn-rate classifier (Idle/Normal/Active/Heavy) — drives sprite animation speed in TUI. |
+| `burn_rate.py` | Burn-rate prediction core used by `menubar.py`. |
 | `menubar.py` | PyObjC menu bar + popover UI. `# mypy: disable-error-code="import-untyped,misc"` is intentional (PyObjC has no stubs). UI layout constants near the top of the file are part of the visual design — don't tweak casually. |
 | `tui.py`, `tui_sprite.py` | `rich`-based terminal renderer. |
+| `tips_loader.py` | Loads tips for the TUI. |
+| `usage_lang.py` | Detects `USAGE_LANG` / system locale. |
 | `setup_hook.py` | Idempotent install/uninstall of the Claude Code statusLine hook, including migration of v0.1.x `usag-*` artifacts. Backs up any pre-existing `statusLine` under `settings["usage"]["previousStatusLine"]`. |
 | `usage_statusline.py` | The hook itself. **Stdlib-only** so it can run under macOS's bundled `/usr/bin/python3` (3.9) — that's why `tool.ruff.lint.per-file-ignores` excludes `UP017` (`datetime.UTC`) for this one file; use `timezone.utc` here. |
+| `usage_statusline_forwarder.py` | Multi-hook fan-out. **Stdlib-only** so it can run under macOS's bundled `/usr/bin/python3` (3.9), with the same constraints as `usage_statusline.py`. |
+| `update_checker.py` | GitHub Releases update check added in v0.11.0. |
+| `login_item.py` | Login item toggle for launching at login. |
+| `panels/` | HTML panel logic and `NSPopover` / `WKWebView` integration. |
+| `adapters/`, `analyzer/`, `ui/` | HTML report subsystem. |
 | `setup_app.py` | `py2app` build script invoked by `scripts/build_app.sh`. Bundles `usage_statusline.py` and asset webps as `Resources/`. |
 
 ### Naming invariant
 
 Everything user-facing and on-disk uses the `usage` prefix: bundle id `com.lollapalooza.usage`, LaunchAgent label, hook filename, status filename, settings backup key. The `usag-*` form is **legacy v0.1.x only** — kept as a read-fallback for migration, never written. Don't reintroduce it.
+
+### i18n rule
+
+All user-visible strings in panels and UI **must** be looked up from `i18n.json` via the `_t()` helper (or the JS `t()` function in HTML panels). Never hardcode any language's text directly in Python, HTML, or TUI code. When adding a new panel or new UI strings, add the key to all five language sections in `i18n.json` (`zh-TW`, `zh-CN`, `en`, `ja`, `ko`) before shipping.
 
 ### Release / changelog
 
