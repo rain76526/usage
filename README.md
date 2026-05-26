@@ -327,3 +327,9 @@ python windows_usage.py --mock
 視窗操作：
 - **拖動**：點住視窗任意位置移動
 - **右鍵選單**：Refresh（立即更新）/ 切換面板 / Quit（結束）
+
+
+授權
+採用 AGPL-3.0-only（見頂部 badge 與 LICENSE）。
+此專案Fork from "aqua5230\usage" 原作者 : aqua5230
+若 fork 或發佈衍生版本，請標注原作者與專案連結：https://github.com/aqua5230/usage
