@@ -387,6 +387,8 @@ python windows_usage.py --mock
 
 ## 授權
 
+> Fork from [aqua5230/usage](https://github.com/aqua5230/usage)
+
 採用 AGPL-3.0-only（見頂部 badge 與 [LICENSE](LICENSE)）。若 fork 或發佈衍生版本，請標注原作者與專案連結：https://github.com/aqua5230/usage
 
 ## 支持這個專案
