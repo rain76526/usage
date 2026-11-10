@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from datetime import UTC, datetime
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -83,3 +84,76 @@ def test_compute_month_stats_handles_none_cost(monkeypatch: pytest.MonkeyPatch) 
 
     assert cost >= 0.0  # None cost_usd → estimated from token counts via pricing.py
     assert sessions == 1
+
+
+# ── _fetch_codex_data ──────────────────────────────────────────────────────────
+
+def test_fetch_codex_data_mock_returns_codex_keys() -> None:
+    data = windows_widget._fetch_codex_data(mock=True)
+    assert "codex_five_pct" in data
+    assert "codex_five_reset" in data
+    assert "codex_seven_pct" in data
+    assert "codex_seven_reset" in data
+    assert "status" in data
+
+
+def test_fetch_codex_data_mock_has_no_claude_keys() -> None:
+    data = windows_widget._fetch_codex_data(mock=True)
+    assert "five_pct" not in data
+    assert "seven_pct" not in data
+    assert "month_cost" not in data
+
+
+def test_fetch_codex_data_live_returns_defaults_when_no_rate_limits() -> None:
+    with patch("windows_widget.codex_loader") as mock_loader:
+        mock_loader.load_rate_limits.return_value = None
+        data = windows_widget._fetch_codex_data(mock=False)
+    assert data["codex_five_pct"] == 0
+    assert data["codex_five_reset"] == "--"
+    assert data["codex_seven_pct"] == 0
+    assert data["codex_seven_reset"] == "--"
+
+
+def test_fetch_codex_data_live_reads_rate_limits() -> None:
+    rl = MagicMock()
+    rl.five_hour_pct = 42.7
+    rl.five_hour_resets_at = time.time() + 3600  # 1 hr from now
+    rl.seven_day_pct = 18.3
+    rl.seven_day_resets_at = time.time() + 2 * 86400  # 2 days
+
+    with patch("windows_widget.codex_loader") as mock_loader:
+        mock_loader.load_rate_limits.return_value = rl
+        data = windows_widget._fetch_codex_data(mock=False)
+
+    assert data["codex_five_pct"] == 43  # round(42.7)
+    assert data["codex_seven_pct"] == 18  # round(18.3)
+    assert data["codex_five_reset"] != "--"
+    assert data["codex_seven_reset"] != "--"
+
+
+def test_fetch_codex_data_live_handles_exception() -> None:
+    with patch("windows_widget.codex_loader") as mock_loader:
+        mock_loader.load_rate_limits.side_effect = RuntimeError("disk error")
+        data = windows_widget._fetch_codex_data(mock=False)
+    # Should not raise; returns defaults
+    assert data["codex_five_pct"] == 0
+    assert data["codex_seven_pct"] == 0
+
+
+# ── _fetch_claude_data ─────────────────────────────────────────────────────────
+
+def test_fetch_claude_data_mock_returns_claude_keys() -> None:
+    data = windows_widget._fetch_claude_data(mock=True)
+    assert "five_pct" in data
+    assert "five_reset" in data
+    assert "seven_pct" in data
+    assert "seven_reset" in data
+    assert "month_cost" in data
+    assert "month_sessions" in data
+    assert "status" in data
+
+
+def test_fetch_claude_data_mock_has_no_codex_keys() -> None:
+    data = windows_widget._fetch_claude_data(mock=True)
+    assert "codex_five_pct" not in data
+    assert "codex_seven_pct" not in data

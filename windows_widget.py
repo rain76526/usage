@@ -9,17 +9,15 @@ import tkinter as tk
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import codex_loader
 from history_loader import UsageEntry, load_entries
 from pricing import calculate_cost
 from usage_client import ClaudeUsageClient, PollState
 
-if TYPE_CHECKING:
-    pass
-
-W, H = 220, 310
+W = 225
+CLAUDE_H = 180
+CODEX_H = 180
 FONT = "Segoe UI"
 
 _PANEL_STATE_PATH = Path.home() / ".claude" / "usage-widget-panel.json"
@@ -42,8 +40,8 @@ class WidgetPanel:
 
 DARK_PANEL = WidgetPanel(
     id="dark", display_name="黑夜",
-    bg="#1a1d27", border="#2e3250", text="#e2e8f0", muted="#8892b0",
-    bar_bg="#2e3250", bar_fg="#1d9e75", bar_warn="#e0a02f", bar_crit="#e05050",
+    bg="#1a1d27", border="#2e3250", text="#e8e0d0", muted="#9a9080",
+    bar_bg="#2e3250", bar_fg="#2aae80", bar_warn="#e0a02f", bar_crit="#e05050",
 )
 LIGHT_PANEL = WidgetPanel(
     id="light", display_name="白日",
@@ -63,8 +61,41 @@ MATRIX_PANEL = WidgetPanel(
     bar_bg="#001a00", bar_fg="#33ff33", bar_warn="#ffff00", bar_crit="#ff3333",
     alpha=0.93,
 )
+AMBER_PANEL = WidgetPanel(
+    id="amber", display_name="琥珀",
+    bg="#1a1200", border="#3d2e00", text="#ffb300", muted="#996a00",
+    bar_bg="#2a1f00", bar_fg="#ffb300", bar_warn="#ff6b00", bar_crit="#ff2200",
+    alpha=0.90,
+)
+OCEAN_PANEL = WidgetPanel(
+    id="ocean", display_name="海洋",
+    bg="#0a1628", border="#1a3a5c", text="#a8d8ea", muted="#4a7fa0",
+    bar_bg="#0f2040", bar_fg="#00b4d8", bar_warn="#f4a261", bar_crit="#e63946",
+    alpha=0.90,
+)
+ROSE_PANEL = WidgetPanel(
+    id="rose", display_name="薔薇",
+    bg="#1a0d12", border="#3d1a25", text="#f2c4ce", muted="#9a6070",
+    bar_bg="#2a1018", bar_fg="#e87a8a", bar_warn="#f4a261", bar_crit="#e63946",
+    alpha=0.90,
+)
+MATCHA_PANEL = WidgetPanel(
+    id="matcha", display_name="抹茶",
+    bg="#f0f4e8", border="#b8c9a0", text="#2d3a1e", muted="#6b7c55",
+    bar_bg="#d0dab8", bar_fg="#5a8a3a", bar_warn="#8a7a30", bar_crit="#8a3030",
+    alpha=0.94,
+)
+EMBER_PANEL = WidgetPanel(
+    id="ember", display_name="炭火",
+    bg="#1d2021", border="#3c3836", text="#ebdbb2", muted="#928374",
+    bar_bg="#3c3836", bar_fg="#d65d0e", bar_warn="#d79921", bar_crit="#cc241d",
+    alpha=0.90,
+)
 
-ALL_PANELS: tuple[WidgetPanel, ...] = (DARK_PANEL, LIGHT_PANEL, NEON_PANEL, MATRIX_PANEL)
+ALL_PANELS: tuple[WidgetPanel, ...] = (
+    DARK_PANEL, LIGHT_PANEL, NEON_PANEL, MATRIX_PANEL,
+    AMBER_PANEL, OCEAN_PANEL, ROSE_PANEL, MATCHA_PANEL, EMBER_PANEL,
+)
 
 
 def load_active_panel_id() -> str:
@@ -164,147 +195,143 @@ def _bar_color(pct: int, panel: WidgetPanel) -> str:
     return panel.bar_fg
 
 
-def _mock_data() -> dict[str, int | float | str]:
-    return {
-        "five_pct": 42,
-        "five_reset": "45min",
-        "seven_pct": 11,
-        "seven_reset": "2d 3hr",
-        "codex_five_pct": 12,
-        "codex_five_reset": "4hr 15min",
-        "codex_seven_pct": 28,
-        "codex_seven_reset": "4d 0hr",
-        "month_cost": 12.34,
-        "month_sessions": 42,
-        "status": "mock",
-    }
-
-
-def _fetch_data(client: ClaudeUsageClient, mock: bool) -> dict[str, int | float | str]:
+def _fetch_codex_data(mock: bool) -> dict[str, int | float | str]:
+    """Fetch Codex rate-limit + monthly stats. Best-effort; never raises."""
     if mock:
-        return _mock_data()
+        return {
+            "codex_five_pct": 12,
+            "codex_five_reset": "4hr 15min",
+            "codex_seven_pct": 28,
+            "codex_seven_reset": "4d 0hr",
+            "codex_month_cost": 3.21,
+            "codex_month_sessions": 17,
+            "status": "mock",
+        }
+    result: dict[str, int | float | str] = {
+        "codex_five_pct": 0,
+        "codex_five_reset": "--",
+        "codex_seven_pct": 0,
+        "codex_seven_reset": "--",
+        "codex_month_cost": 0.0,
+        "codex_month_sessions": 0,
+        "status": "ok",
+    }
+    try:
+        rl = codex_loader.load_rate_limits()
+        if rl is not None:
+            if rl.five_hour_pct is not None:
+                result["codex_five_pct"] = round(rl.five_hour_pct)
+            if rl.five_hour_resets_at is not None:
+                result["codex_five_reset"] = format_reset(rl.five_hour_resets_at)
+            if rl.seven_day_pct is not None:
+                result["codex_seven_pct"] = round(rl.seven_day_pct)
+            if rl.seven_day_resets_at is not None:
+                result["codex_seven_reset"] = format_reset(rl.seven_day_resets_at)
+    except Exception:
+        result["status"] = "err"
+    try:
+        entries = codex_loader.load_entries()
+        cost, sessions = compute_month_stats(entries)
+        result["codex_month_cost"] = cost
+        result["codex_month_sessions"] = sessions
+    except Exception:
+        pass
+    return result
 
+
+def _fetch_claude_data(
+    mock: bool, client: ClaudeUsageClient | None = None
+) -> dict[str, int | float | str]:
+    """Fetch Claude Code rate-limit and history data only (no Codex keys)."""
+    if mock:
+        return {
+            "five_pct": 42,
+            "five_reset": "45min",
+            "seven_pct": 11,
+            "seven_reset": "2d 3hr",
+            "month_cost": 12.34,
+            "month_sessions": 42,
+            "status": "mock",
+        }
+
+    assert client is not None, "client required in live mode"
     outcome = asyncio.run(client.fetch_once())
     snap = outcome.snapshot
 
-    # Always load history entries — used for token stats and month summary
     entries = load_entries()
     five_h_pct, seven_d_pct, five_h_tok, seven_d_tok = _token_stats(entries)
     month_cost, month_sessions = compute_month_stats(entries)
 
     if outcome.state != PollState.SUCCESS or snap is None:
-        # No rate-limit data from Claude Code hook → fall back to JSONL token stats
-        codex_five_pct = 0
-        codex_five_reset = "--"
-        codex_seven_pct = 0
-        codex_seven_reset = "--"
-        try:
-            rl = codex_loader.load_rate_limits()
-            if rl is not None:
-                if rl.five_hour_pct is not None:
-                    codex_five_pct = round(rl.five_hour_pct)
-                if rl.five_hour_resets_at is not None:
-                    codex_five_reset = format_reset(rl.five_hour_resets_at)
-                if rl.seven_day_pct is not None:
-                    codex_seven_pct = round(rl.seven_day_pct)
-                if rl.seven_day_resets_at is not None:
-                    codex_seven_reset = format_reset(rl.seven_day_resets_at)
-        except Exception:
-            pass
         return {
             "five_pct": five_h_pct,
             "five_reset": f"{_format_tokens(five_h_tok)} tokens",
             "seven_pct": seven_d_pct,
             "seven_reset": f"{_format_tokens(seven_d_tok)} tokens",
-            "codex_five_pct": codex_five_pct,
-            "codex_five_reset": codex_five_reset,
-            "codex_seven_pct": codex_seven_pct,
-            "codex_seven_reset": codex_seven_reset,
             "month_cost": month_cost,
             "month_sessions": month_sessions,
             "status": "est",
         }
-
-    # Codex rate limits (best-effort; failure is silent)
-    codex_five_pct = 0
-    codex_five_reset = "--"
-    codex_seven_pct = 0
-    codex_seven_reset = "--"
-    try:
-        rl = codex_loader.load_rate_limits()
-        if rl is not None:
-            if rl.five_hour_pct is not None:
-                codex_five_pct = round(rl.five_hour_pct)
-            if rl.five_hour_resets_at is not None:
-                codex_five_reset = format_reset(rl.five_hour_resets_at)
-            if rl.seven_day_pct is not None:
-                codex_seven_pct = round(rl.seven_day_pct)
-            if rl.seven_day_resets_at is not None:
-                codex_seven_reset = format_reset(rl.seven_day_resets_at)
-    except Exception:
-        pass
 
     return {
         "five_pct": snap.current_percent or 0,
         "five_reset": format_reset(snap.current_reset_at),
         "seven_pct": snap.weekly_percent or 0,
         "seven_reset": format_reset(snap.weekly_reset_at),
-        "codex_five_pct": codex_five_pct,
-        "codex_five_reset": codex_five_reset,
-        "codex_seven_pct": codex_seven_pct,
-        "codex_seven_reset": codex_seven_reset,
         "month_cost": month_cost,
         "month_sessions": month_sessions,
         "status": "ok",
     }
 
 
-class UsageWidget:
-    def __init__(self, mock: bool, interval: int) -> None:
+# Transparent cut-out key colour — painted on canvas corners so Windows makes
+# them see-through via -transparentcolor. Must not appear in any panel palette.
+_TRANSPARENT_KEY = "#fe00fe"
+
+# ── shared widget infrastructure ──────────────────────────────────────────────
+
+class _BaseWidget:
+    """Drag, menu, panel-switching, and bar-drawing shared by both widgets."""
+
+    def __init__(self, root: tk.Tk, mock: bool, interval: int,
+                 height: int, x: int, y: int) -> None:
         self._mock = mock
         self._interval = max(30, interval) * 1000  # ms
-        self._client = ClaudeUsageClient(interval_seconds=interval, mock=mock)
         self._panel = _get_panel(load_active_panel_id())
+        self._tk_root = root
 
-        self._root = tk.Tk()
-        self._root.overrideredirect(True)
-        self._root.wm_attributes("-topmost", True)
-        self._root.wm_attributes("-alpha", self._panel.alpha)
-        self._root.configure(bg=self._panel.bg)
-        self._root.geometry(f"{W}x{H}+40+40")
-        self._root.resizable(False, False)
+        win = tk.Toplevel(root)
+        win.overrideredirect(True)
+        win.wm_attributes("-topmost", True)
+        win.wm_attributes("-alpha", self._panel.alpha)
+        win.wm_attributes("-transparentcolor", _TRANSPARENT_KEY)
+        win.configure(bg=_TRANSPARENT_KEY)
+        win.geometry(f"{W}x{height}+{x}+{y}")
+        win.resizable(False, False)
+        self._win = win
 
         self._drag_x = 0
         self._drag_y = 0
 
         self._canvas = tk.Canvas(
-            self._root, width=W, height=H, bg=self._panel.bg,
+            self._win, width=W, height=height, bg=_TRANSPARENT_KEY,
             highlightthickness=0, bd=0,
         )
         self._canvas.pack(fill="both", expand=True)
-
         self._canvas.bind("<Button-1>", self._on_drag_start)
         self._canvas.bind("<B1-Motion>", self._on_drag_motion)
         self._canvas.bind("<Button-3>", self._on_right_click)
 
+        self._fetch_lock = threading.Lock()
         self._menu = self._build_menu()
 
-        self._fetch_lock = threading.Lock()
-        self._data: dict[str, int | float | str] = {
-            "five_pct": 0, "five_reset": "--",
-            "seven_pct": 0, "seven_reset": "--",
-            "codex_five_pct": 0, "codex_five_reset": "--",
-            "codex_seven_pct": 0, "codex_seven_reset": "--",
-            "month_cost": 0.0, "month_sessions": 0,
-            "status": "loading",
-        }
-        self._refresh()
+    # ── menu ──────────────────────────────────────────────────────────────────
 
     def _build_menu(self) -> tk.Menu:
         p = self._panel
         active_bg = "#3a3f60" if p.id == "dark" else p.border
         menu = tk.Menu(
-            self._root, tearoff=0,
+            self._win, tearoff=0,
             bg=p.border, fg=p.text,
             activebackground=active_bg, activeforeground=p.text,
         )
@@ -325,16 +352,17 @@ class UsageWidget:
             )
         menu.add_cascade(label="切換面板", menu=panel_menu)
         menu.add_separator()
-        menu.add_command(label="Quit", command=self._root.destroy)
+        menu.add_command(label="Close", command=self._win.destroy)
+        menu.add_command(label="Quit All", command=self._tk_root.destroy)
         return menu
 
     def _set_panel(self, panel_id: str) -> None:
         self._panel = _get_panel(panel_id)
         save_active_panel_id(panel_id)
         p = self._panel
-        self._root.configure(bg=p.bg)
-        self._root.wm_attributes("-alpha", p.alpha)
-        self._canvas.configure(bg=p.bg)
+        self._win.configure(bg=_TRANSPARENT_KEY)
+        self._win.wm_attributes("-alpha", p.alpha)
+        self._canvas.configure(bg=_TRANSPARENT_KEY)
         self._menu = self._build_menu()
         self._draw()
 
@@ -345,79 +373,25 @@ class UsageWidget:
         self._drag_y = event.y
 
     def _on_drag_motion(self, event: tk.Event[tk.Canvas]) -> None:
-        x = self._root.winfo_x() + event.x - self._drag_x
-        y = self._root.winfo_y() + event.y - self._drag_y
-        self._root.geometry(f"+{x}+{y}")
+        x = self._win.winfo_x() + event.x - self._drag_x
+        y = self._win.winfo_y() + event.y - self._drag_y
+        self._win.geometry(f"+{x}+{y}")
 
     def _on_right_click(self, event: tk.Event[tk.Canvas]) -> None:
         self._menu.tk_popup(event.x_root, event.y_root)
 
-    # ── data + render ─────────────────────────────────────────────────────────
-
-    def _refresh(self) -> None:
-        if self._fetch_lock.locked():
-            self._root.after(self._interval, self._refresh)
-            return
-
-        def _fetch() -> None:
-            with self._fetch_lock:
-                data = _fetch_data(self._client, self._mock)
-                self._root.after(0, lambda: self._apply(data))
-
-        threading.Thread(target=_fetch, daemon=True).start()
-        self._root.after(self._interval, self._refresh)
+    # ── data ──────────────────────────────────────────────────────────────────
 
     def _apply(self, data: dict[str, int | float | str]) -> None:
         self._data = data
         self._draw()
 
-    def _draw(self) -> None:
-        p = self._panel
-        c = self._canvas
-        c.delete("all")
-        d = self._data
-
-        c.create_rectangle(1, 1, W - 1, H - 1, outline=p.border, fill=p.bg, width=1)
-        c.create_text(12, 12, text="Claude Code Usage", anchor="nw",
-                      font=(FONT, 11, "bold"), fill=p.text)
-        c.create_line(12, 30, W - 12, 30, fill=p.border)
-
-        # ── Claude Code ────────────────────────────────────────────────────────
-        self._draw_section(c, y=38, label="5-Hour Window",
-                           pct=int(d["five_pct"]),
-                           reset_label=str(d["five_reset"]))
-        c.create_line(12, 88, W - 12, 88, fill=p.border)
-
-        self._draw_section(c, y=96, label="7-Day Window",
-                           pct=int(d["seven_pct"]),
-                           reset_label=str(d["seven_reset"]))
-        c.create_line(12, 146, W - 12, 146, fill=p.border)
-
-        # ── Codex ──────────────────────────────────────────────────────────────
-        c.create_text(12, 152, text="Codex", anchor="nw",
-                      font=(FONT, 8, "bold"), fill=p.muted)
-
-        self._draw_section(c, y=162, label="5-Hour Window",
-                           pct=int(d["codex_five_pct"]),
-                           reset_label=str(d["codex_five_reset"]))
-        c.create_line(12, 212, W - 12, 212, fill=p.border)
-
-        self._draw_section(c, y=220, label="7-Day Window",
-                           pct=int(d["codex_seven_pct"]),
-                           reset_label=str(d["codex_seven_reset"]))
-        c.create_line(12, 270, W - 12, 270, fill=p.border)
-
-        # ── Monthly ────────────────────────────────────────────────────────────
-        c.create_text(12, 278, text="This Month", anchor="nw",
-                      font=(FONT, 9), fill=p.muted)
-        cost_str = f"Cost ${d['month_cost']:.2f}  |  Sessions {d['month_sessions']}"
-        c.create_text(12, 290, text=cost_str, anchor="nw",
-                      font=(FONT, 9), fill=p.text)
+    # ── drawing helpers ───────────────────────────────────────────────────────
 
     def _draw_section(self, c: tk.Canvas, y: int, label: str,
                       pct: int, reset_label: str) -> None:
         p = self._panel
-        bar_w = 196
+        bar_w = W - 24
         bar_h = 8
         bar_x = 12
         bar_y = y + 16
@@ -436,9 +410,168 @@ class UsageWidget:
         c.create_text(12, bar_y + bar_h + 4, text=sub,
                       anchor="nw", font=(FONT, 8), fill=p.muted)
 
-    def run(self) -> None:
-        self._root.mainloop()
+    def _draw_monthly(self, c: tk.Canvas, cost: float, sessions: int) -> None:
+        """Draw the 'This Month' footer at y=152/164 (fixed position)."""
+        p = self._panel
+        c.create_text(12, 152, text="This Month", anchor="nw",
+                      font=(FONT, 9), fill=p.muted)
+        cost_str = f"Cost ${cost:.2f}  |  Sessions {sessions}"
+        c.create_text(12, 164, text=cost_str, anchor="nw",
+                      font=(FONT, 9), fill=p.text)
+
+    # ── subclass interface ────────────────────────────────────────────────────
+
+    def _draw_border(self, c: tk.Canvas, h: int, r: int = 5) -> None:
+        """Rounded-corner widget border (radius r) via arc+line method."""
+        p = self._panel
+        x1, y1, x2, y2 = 1, 1, W - 1, h - 1
+        d = r * 2  # arc bounding-box diameter
+        kw_fill = {"fill": p.bg, "outline": ""}
+        # filled corner arcs
+        c.create_arc(x1,      y1,      x1 + d, y1 + d, start= 90, extent=90, style="pie", **kw_fill)
+        c.create_arc(x2 - d,  y1,      x2,     y1 + d, start=  0, extent=90, style="pie", **kw_fill)
+        c.create_arc(x2 - d,  y2 - d,  x2,     y2,     start=270, extent=90, style="pie", **kw_fill)
+        c.create_arc(x1,      y2 - d,  x1 + d, y2,     start=180, extent=90, style="pie", **kw_fill)
+        # filled centre rects (background)
+        c.create_rectangle(x1 + r, y1,     x2 - r, y2,     fill=p.bg, outline="")
+        c.create_rectangle(x1,     y1 + r, x1 + r, y2 - r, fill=p.bg, outline="")
+        c.create_rectangle(x2 - r, y1 + r, x2,     y2 - r, fill=p.bg, outline="")
+        # border arcs (outline only)
+        kw_arc = {"outline": p.border, "width": 1}
+        c.create_arc(x1,      y1,      x1 + d, y1 + d, start= 90, extent=90, style="arc", **kw_arc)
+        c.create_arc(x2 - d,  y1,      x2,     y1 + d, start=  0, extent=90, style="arc", **kw_arc)
+        c.create_arc(x2 - d,  y2 - d,  x2,     y2,     start=270, extent=90, style="arc", **kw_arc)
+        c.create_arc(x1,      y2 - d,  x1 + d, y2,     start=180, extent=90, style="arc", **kw_arc)
+        # border straight edges
+        c.create_line(x1 + r, y1,     x2 - r, y1,     fill=p.border, width=1)
+        c.create_line(x2,     y1 + r, x2,     y2 - r, fill=p.border, width=1)
+        c.create_line(x2 - r, y2,     x1 + r, y2,     fill=p.border, width=1)
+        c.create_line(x1,     y2 - r, x1,     y1 + r, fill=p.border, width=1)
+
+    def _draw(self) -> None:
+        raise NotImplementedError
+
+    def _refresh(self) -> None:
+        raise NotImplementedError
+
+
+# ── concrete widgets ──────────────────────────────────────────────────────────
+
+class UsageWidget(_BaseWidget):
+    """Claude Code rate-limit + monthly cost widget."""
+
+    def __init__(self, root: tk.Tk, mock: bool, interval: int) -> None:
+        self._client = ClaudeUsageClient(interval_seconds=interval, mock=mock)
+        self._data: dict[str, int | float | str] = {
+            "five_pct": 0, "five_reset": "--",
+            "seven_pct": 0, "seven_reset": "--",
+            "month_cost": 0.0, "month_sessions": 0,
+            "status": "loading",
+        }
+        super().__init__(root, mock, interval, height=CLAUDE_H, x=40, y=40)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._fetch_lock.locked():
+            self._win.after(self._interval, self._refresh)
+            return
+
+        def _fetch() -> None:
+            with self._fetch_lock:
+                data = _fetch_claude_data(mock=self._mock, client=self._client)
+                self._win.after(0, lambda: self._apply(data))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+        self._win.after(self._interval, self._refresh)
+
+    def _draw(self) -> None:
+        p = self._panel
+        c = self._canvas
+        c.delete("all")
+        d = self._data
+
+        self._draw_border(c, CLAUDE_H)
+        c.create_text(12, 12, text="Claude Code Usage", anchor="nw",
+                      font=(FONT, 11, "bold"), fill=p.text)
+        c.create_line(12, 30, W - 12, 30, fill=p.border)
+
+        self._draw_section(c, y=38, label="5-Hour Window",
+                           pct=int(d["five_pct"]),
+                           reset_label=str(d["five_reset"]))
+        c.create_line(12, 88, W - 12, 88, fill=p.border)
+
+        self._draw_section(c, y=96, label="7-Day Window",
+                           pct=int(d["seven_pct"]),
+                           reset_label=str(d["seven_reset"]))
+        c.create_line(12, 146, W - 12, 146, fill=p.border)
+
+        self._draw_monthly(c, float(d["month_cost"]), int(d["month_sessions"]))
+
+
+class CodexWidget(_BaseWidget):
+    """Codex rate-limit + monthly cost widget — independent floating window."""
+
+    def __init__(self, root: tk.Tk, mock: bool, interval: int) -> None:
+        self._data: dict[str, int | float | str] = {
+            "codex_five_pct": 0, "codex_five_reset": "--",
+            "codex_seven_pct": 0, "codex_seven_reset": "--",
+            "codex_month_cost": 0.0, "codex_month_sessions": 0,
+            "status": "loading",
+        }
+        # Position below the Claude widget (CLAUDE_H=180 + 10px gap)
+        super().__init__(root, mock, interval, height=CODEX_H, x=40, y=230)
+        self._refresh()
+
+    def _refresh(self) -> None:
+        if self._fetch_lock.locked():
+            self._win.after(self._interval, self._refresh)
+            return
+
+        def _fetch() -> None:
+            with self._fetch_lock:
+                data = _fetch_codex_data(mock=self._mock)
+                self._win.after(0, lambda: self._apply(data))
+
+        threading.Thread(target=_fetch, daemon=True).start()
+        self._win.after(self._interval, self._refresh)
+
+    def _draw(self) -> None:
+        p = self._panel
+        c = self._canvas
+        c.delete("all")
+        d = self._data
+
+        self._draw_border(c, CODEX_H)
+        c.create_text(12, 12, text="Codex Usage", anchor="nw",
+                      font=(FONT, 11, "bold"), fill=p.text)
+        c.create_line(12, 30, W - 12, 30, fill=p.border)
+
+        self._draw_section(c, y=38, label="5-Hour Window",
+                           pct=int(d["codex_five_pct"]),
+                           reset_label=str(d["codex_five_reset"]))
+        c.create_line(12, 88, W - 12, 88, fill=p.border)
+
+        self._draw_section(c, y=96, label="7-Day Window",
+                           pct=int(d["codex_seven_pct"]),
+                           reset_label=str(d["codex_seven_reset"]))
+        c.create_line(12, 146, W - 12, 146, fill=p.border)
+
+        self._draw_monthly(c, float(d["codex_month_cost"]), int(d["codex_month_sessions"]))
 
 
 def run(mock: bool = False, interval: int = 60) -> None:
-    UsageWidget(mock=mock, interval=interval).run()
+    root = tk.Tk()
+    root.withdraw()  # hidden root — owns both Toplevels
+    UsageWidget(root, mock=mock, interval=interval)
+    CodexWidget(root, mock=mock, interval=interval)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--mock", action="store_true")
+    parser.add_argument("--interval", type=int, default=60)
+    args = parser.parse_args()
+    run(mock=args.mock, interval=args.interval)
